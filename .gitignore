@@ -147,3 +147,8 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# OS / tooling
+.DS_Store
+.playwright-mcp/
+.claude/settings.local.json
