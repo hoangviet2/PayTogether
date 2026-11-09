@@ -1,7 +1,7 @@
 // Trip state and every rule-bearing mutation. Pure-ish: no network; callers run side effects (PayPal, Elastic, Wayfinder).
 // shortcut: one JSON file instead of Postgres + Prisma; move to the claudee.md stack before more than one server runs.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import {
   PALETTE, PHASES, confirmBlocker, equalBps, pollTally, redate, shareAmounts, validateTimeline,
   type Leg, type PlaceOption, type Poll, type Preview, type Trip, type Txn,
@@ -9,6 +9,12 @@ import {
 
 const FILE = process.env.DATA_FILE ?? new URL('../data.json', import.meta.url).pathname;
 export const trips = new Map<string, Trip>(existsSync(FILE) ? Object.entries(JSON.parse(readFileSync(FILE, 'utf8'))) : []);
+// Code alphabet without look-alikes (0/O, 1/I/L) so it can be read out loud.
+const newCode = (): string => {
+  const c = Array.from({ length: 6 }, () => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[randomInt(31)]).join('');
+  return [...trips.values()].some((t) => t.code === c) ? newCode() : c;
+};
+for (const t of trips.values()) t.code ??= newCode(); // trips saved before join codes existed
 export const save = () => {
   if (process.env.DATA_FILE !== ':memory:') writeFileSync(FILE, JSON.stringify(Object.fromEntries(trips)));
 };
@@ -20,16 +26,31 @@ const reject = (msg: string): never => { throw new Rejected(msg); };
 export const OPENING =
   "Hi everyone 👋 I'm Wayfinder. Where do you want to go? Drop cities, regions, or even a vibe (\"somewhere warm with good food\") — plus rough dates and budget if you have them.";
 
-export function createTrip(name: string, currency: string, names: string[]): Trip {
+/** `user` is the creator's PayPal id; they become member 0. */
+export function createTrip(name: string, currency: string, names: string[], user?: string): Trip {
   const t: Trip = {
-    id: id(), name, currency, phase: 'DESTINATIONS',
-    members: names.map((n, i) => ({ name: n, ...PALETTE[i] })),
+    id: id(), name, currency, phase: 'DESTINATIONS', code: newCode(),
+    members: names.map((n, i) => ({ name: n, ...PALETTE[i], ...(i === 0 && user && { user }) })),
     window: null, destinations: [], legs: [], polls: [], previews: [], txs: [], confirms: [], busy: false,
     chat: [{ from: 'ai', at: now(), text: OPENING }],
   };
   trips.set(t.id, t);
   save();
   return t;
+}
+
+export const byCode = (code: string) => [...trips.values()].find((t) => t.code === code.trim().toUpperCase());
+export const memberOf = (t: Trip, user: string) => t.members.findIndex((m) => m.user === user);
+
+/** Adds a logged-in user as a member; joining twice returns the same seat. Closed once prices are split per member. */
+export function join(t: Trip, name: string, user: string): number {
+  const seat = memberOf(t, user);
+  if (seat >= 0) return seat;
+  if (PHASES.indexOf(t.phase) >= PHASES.indexOf('PRICING')) reject('This trip is already splitting prices, so new members can no longer join.');
+  if (t.members.length >= PALETTE.length) reject(`A trip can have at most ${PALETTE.length} members.`);
+  t.members.push({ name, ...PALETTE[t.members.length], user });
+  say(t, 'ai', `${name} joined the trip 👋`);
+  return t.members.length - 1;
 }
 
 export const say = (t: Trip, from: number | 'ai', text: string) => t.chat.push({ from, at: now(), text });
@@ -223,7 +244,8 @@ export function logExpense(t: Trip, m: number, e: { date: string; time: string; 
 
 /** What Wayfinder sees: no chat (it gets that separately) and no PayPal order ids. */
 export const publicState = (t: Trip) => ({
-  ...t, chat: undefined, busy: undefined,
+  ...t, chat: undefined, busy: undefined, code: undefined,
+  members: t.members.map(({ user: _, ...m }) => m), // PayPal ids stay out of the model prompt
   previews: t.previews.map((p) => ({ ...p, shares: p.shares.map(({ order_id: _, ...s }) => s) })),
   trip_window_nights: t.window ? Math.round((Date.parse(t.window.end) - Date.parse(t.window.start)) / 864e5) : null,
   today: now().slice(0, 10),

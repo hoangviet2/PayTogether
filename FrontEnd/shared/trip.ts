@@ -257,9 +257,9 @@ export const PHASES: Phase[] = ['DESTINATIONS', 'TIMELINE', 'PLACES', 'PRICING',
 export const PHASE_LABEL: Record<Phase, string> = {
   DESTINATIONS: 'Destinations', TIMELINE: 'Timeline', PLACES: 'Places', PRICING: 'Pricing', BOOKED: 'Booked', ON_TRIP: 'On trip', SETTLED: 'Settled',
 };
-export type Person = { name: string; symbol: string; color: string; tint: string };
+export type Person = { name: string; symbol: string; color: string; tint: string; user?: string }; // user: PayPal id once they log in
 /** Color + symbol per member slot, never color alone (invariant 10). */
-export const PALETTE: Omit<Person, 'name'>[] = [
+export const PALETTE: Omit<Person, 'name' | 'user'>[] = [
   ...members.map(({ symbol, color, tint }) => ({ symbol, color, tint })),
   { symbol: '■', color: '#1D4ED8', tint: '#DBE7FB' },
   { symbol: '◗', color: '#0F766E', tint: '#D5F0EC' },
@@ -286,7 +286,7 @@ export type Txn = {
 };
 export type LiveMsg = { from: number | 'ai'; at: string; text: string };
 export type Trip = {
-  id: string; name: string; currency: string; phase: Phase; members: Person[];
+  id: string; name: string; currency: string; phase: Phase; members: Person[]; code: string; // code: what friends type to join
   window: { start: string; end: string } | null; budget_per_person_cents?: number;
   destinations: string[]; legs: Leg[]; polls: Poll[]; previews: Preview[]; chat: LiveMsg[]; txs: Txn[];
   confirms: number[]; busy: boolean;

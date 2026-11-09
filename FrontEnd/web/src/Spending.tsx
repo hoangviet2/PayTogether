@@ -20,12 +20,12 @@ export function Spending({ ctx }: { ctx: Ctx }) {
   useEffect(() => {
     if (!q.trim()) return;
     const timer = setTimeout(() => {
-      api<{ ids: string[]; engine: string }>(`/trips/${trip.id}/search?q=${encodeURIComponent(q)}`, { member: ctx.me })
+      api<{ ids: string[]; engine: string }>(`/trips/${trip.id}/search?q=${encodeURIComponent(q)}`)
         .then((r) => setHit({ ids: new Set(r.ids), engine: r.engine }))
         .catch(() => setHit(null));
     }, 250);
     return () => clearTimeout(timer);
-  }, [q, trip.id, trip.txs.length, ctx.me]);
+  }, [q, trip.id, trip.txs.length]);
 
   const active = q.trim() ? hit : null;
   const rows = useMemo<Row[]>(

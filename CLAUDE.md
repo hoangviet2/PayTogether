@@ -8,10 +8,10 @@ The web app is a first-time flow backed by `Backend/`. A user creates a trip, te
 
 ## Backend (`Backend/`, port 8787)
 
-- `src/server.ts`: node:http routes under `/api`; Zod validates every body. The acting member comes from the `x-member` header (shortcut until Log in with PayPal).
+- `src/server.ts`: node:http routes under `/api`; Zod validates every body. Who is calling comes from the signed `x-session` header issued by `POST /api/auth/paypal` (Log in with PayPal, authorization code → userinfo); a member is the trip seat whose `user` is that PayPal id. Friends join with the trip's 6-character code (`POST /api/join`), open until Pricing.
 - `src/store.ts`: trip state and every rule-bearing mutation (quorum confirms, poll ties, own-split-only edits, webhook-only payment status). Persists to `Backend/data.json`.
 - `src/wayfinder.ts`: one OpenAI Responses API turn per chat message or event, with a hand-written tool loop (Zod-checked arguments, max 20 steps). Tools are phase-gated per `ai.md` §4; places come from the built-in `web_search` tool. `gpt-5.5` for turns, `gpt-5.4-mini` for should-reply. Needs `OPENAI_API_KEY`.
-- `src/integrations.ts`: PayPal Orders v2 + webhook verification, Channel3, Kernel, Elasticsearch. Each one is off (HTTP 503 naming the missing variable) until its keys are in `Backend/.env`; see `.env.example`.
+- `src/integrations.ts`: PayPal Orders v2 + webhook verification, Log in with PayPal + HMAC sessions (`SESSION_SECRET`), Channel3, Kernel, Elasticsearch. Each one is off (HTTP 503 naming the missing variable) until its keys are in `Backend/.env`; see `.env.example`.
 - Payment status changes only in `POST /api/paypal/webhook`, so local dev needs a public tunnel to receive PayPal webhooks.
 - Deploy: `render.yaml` (Render Blueprint) builds from the repo root because the server imports `FrontEnd/shared/`. It uses a paid instance with a disk at `/var/data` (`DATA_FILE`), since free instances wipe the filesystem. `ACCESS_TOKEN` gates every route except `/api/config` and the PayPal webhook; the web dev proxy sends it from `FrontEnd/web/.env.local` (`API_URL`, `API_TOKEN`).
 

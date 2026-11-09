@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, saveMember, savedMember, useTrip, type Ctx } from './api';
+import { api, finishLogin, getSession, useTrip, type Ctx } from './api';
 import type { Trip } from '../../shared/trip';
 import { Chat, TripHeader } from './ui';
 import { Login, Trips } from './Entry';
@@ -22,23 +22,25 @@ const useHash = () => {
 
 export default function App() {
   const route = useHash();
+  const [login, setLogin] = useState<{ busy: boolean; error?: string }>({ busy: true });
+  useEffect(() => { finishLogin().then(() => setLogin({ busy: false }), (e) => setLogin({ busy: false, error: e.message })); }, []);
+  if (login.busy) return <p className="wrap" style={{ padding: 48 }}>Signing you in…</p>;
+  if (!getSession()) return <Login error={login.error} />; // every page past the landing needs Log in with PayPal
   if (route === 'trips') return <Trips />;
   const m = route.match(/^trip\/([\w-]+)\/?(\w+)?/);
-  if (!m) return <Login />;
+  if (!m) return <Login error={login.error} />;
   return <Workspace key={m[1]} id={m[1]} tab={m[2] ?? 'plan'} />;
 }
 
 function Workspace({ id, tab }: { id: string; tab: string }) {
   const { trip, setTrip, error, setError } = useTrip(id);
-  const [me, setMeState] = useState(() => savedMember(id));
   if (!trip) return <p className="wrap" style={{ padding: 48 }} role={error ? 'alert' : undefined}>{error ?? 'Loading trip…'}</p>;
 
   const ctx: Ctx = {
-    trip, me: Math.min(me, trip.members.length - 1),
-    setMe: (n) => { saveMember(id, n); setMeState(n); },
+    trip, me: Math.max(0, trip.members.findIndex((p) => p.user === getSession()?.user)), // the server only serves trips you are in
     act: async (path, body) => {
       try {
-        const t = await api<Trip>(`/trips/${id}${path}`, { body: body ?? {}, member: me });
+        const t = await api<Trip>(`/trips/${id}${path}`, { body: body ?? {} });
         if (t?.id) setTrip(t);
         setError(null);
       } catch (e) {

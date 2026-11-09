@@ -36,7 +36,8 @@ export const Chip = ({ p, size = 32, ring }: { p: Person; size?: number; ring?: 
 );
 
 export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
-  const { trip, me, setMe } = ctx;
+  const { trip, me } = ctx;
+  const [copied, setCopied] = useState(false);
   const tabs = ['plan', 'schedule', 'spending', 'dashboard', 'shop'];
   return (
     <header style={{ background: '#fff', borderBottom: '1px solid var(--line)' }}>
@@ -52,14 +53,18 @@ export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
             </div>
             <span className="pill pill-orange">{PHASE_LABEL[trip.phase]}</span>
           </div>
-          <label className="row small" style={{ gap: 8 }}>
-            <span className="muted">Acting as</span>
-            <Chip p={trip.members[me]} size={28} />
-            <select value={me} onChange={(e) => setMe(Number(e.target.value))} aria-label="Which member you are"
-              style={{ minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 10px' }}>
-              {trip.members.map((m, i) => <option key={i} value={i}>{m.name}{i === 0 ? ' (owner)' : ''}</option>)}
-            </select>
-          </label>
+          <div className="row small" style={{ gap: 14, flexWrap: 'wrap' }}>
+            {/* Friends log in with PayPal, then enter this code on the trips page. */}
+            <button type="button" className="btn" style={{ minHeight: 40 }} aria-label={`Join code ${trip.code}, copy`}
+              onClick={() => navigator.clipboard?.writeText(trip.code).then(() => setCopied(true), () => {})}>
+              <span className="muted">Join code</span><span className="mono" style={{ fontWeight: 600, letterSpacing: '0.12em' }}>{trip.code}</span>
+              <span className="muted" aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+            <span className="row" style={{ gap: 8 }}>
+              <Chip p={trip.members[me]} size={28} />
+              <span>{trip.members[me].name}{me === 0 ? ' (owner)' : ''}</span>
+            </span>
+          </div>
         </div>
         <nav aria-label="Trip sections" className="tabs">
           {tabs.map((t) => (
@@ -254,7 +259,7 @@ function PayShare({ ctx, previewId, orderId, label, currency }: { ctx: Ctx; prev
     loadScript(`https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.paypalClientId)}&currency=${currency}&intent=capture`).then(() => {
       btns = window.paypal!.Buttons({
         createOrder: () => orderId,
-        onApprove: () => api(`/trips/${ctx.trip.id}/previews/${previewId}/capture`, { body: {}, member: ctx.me })
+        onApprove: () => api(`/trips/${ctx.trip.id}/previews/${previewId}/capture`, { body: {} })
           .then(() => setState('approved'))
           .catch((e) => { setState('error'); setMsg(e.message); }),
         onError: (e: Error) => { setState('error'); setMsg(e.message); },
@@ -262,7 +267,7 @@ function PayShare({ ctx, previewId, orderId, label, currency }: { ctx: Ctx; prev
       return btns.render(box.current!);
     }).catch((e) => { setState('error'); setMsg(e.message); });
     return () => { btns?.close(); };
-  }, [state, cfg, orderId, currency, previewId, ctx.trip.id, ctx.me]);
+  }, [state, cfg, orderId, currency, previewId, ctx.trip.id]);
 
   if (cfg && !cfg.paypalClientId) return <span className="small" style={{ color: 'var(--orange-ink)' }}>PayPal isn’t configured on the server.</span>;
   if (state === 'approved') return <span className="btn btn-on"><Icon d={icons.check} />Approved — waiting for PayPal to confirm</span>;

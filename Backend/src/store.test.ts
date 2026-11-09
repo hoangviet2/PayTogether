@@ -72,3 +72,17 @@ test('logged expense: rows sum to the total and are paid by the logger', () => {
   assert.ok(rows.every((r) => r.paid_by === 1 && r.leg === 'Lisbon'));
   assert.throws(() => s.logExpense(t, 1, { date: '2027-05-15', time: '20:00', vendor: 'X', type: 'Y', total: 1, bps: [5000, 5000] }), s.Rejected);
 });
+
+test('join by code: owner is member 0, joining twice keeps one seat, closed once prices are split', () => {
+  const t = s.createTrip('Join', 'USD', ['Owner'], 'pp-owner');
+  assert.equal(s.memberOf(t, 'pp-owner'), 0);
+  assert.match(t.code, /^[A-HJKMNP-Z2-9]{6}$/);
+  assert.equal(s.byCode(` ${t.code.toLowerCase()} `), t);
+  assert.equal(s.join(t, 'Friend', 'pp-friend'), 1);
+  assert.equal(s.join(t, 'Friend', 'pp-friend'), 1);
+  assert.equal(t.members.length, 2);
+  t.phase = 'PRICING';
+  assert.throws(() => s.join(t, 'Late', 'pp-late'), s.Rejected);
+  assert.equal(s.publicState(t).code, undefined);
+  assert.ok(s.publicState(t).members.every((m) => !('user' in m)));
+});

@@ -3,6 +3,7 @@
 import { Channel3 } from '@channel3/sdk';
 import { Kernel } from '@onkernel/sdk';
 import { Client as Elastic } from '@elastic/elasticsearch';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { parseQuery, type Person, type Txn } from '../../FrontEnd/shared/trip.ts';
 
 const env = process.env;
@@ -45,6 +46,46 @@ async function pp(path: string, body: unknown, requestId?: string) {
   const d = (await r.json()) as Record<string, any>;
   if (!r.ok) throw new Error(`PayPal ${path} ${r.status}: ${d.message ?? d.name ?? 'error'}`);
   return d;
+}
+
+// ---------- Log in with PayPal (OAuth 2.0 authorization code + userinfo) ----------
+/** The sign-in page; the browser adds redirect_uri and state. Needs "Log in with PayPal" on in the PayPal app settings. */
+export const loginUrl = () => ready.paypal
+  ? `${env.PAYPAL_ENV === 'live' ? 'https://www.paypal.com' : 'https://www.sandbox.paypal.com'}/connect/?flowEntry=static&response_type=code&scope=${encodeURIComponent('openid profile email')}&client_id=${encodeURIComponent(env.PAYPAL_CLIENT_ID!)}`
+  : null;
+
+/** Trades the code PayPal sent back for who the user is. */
+export async function paypalUser(code: string): Promise<{ user: string; name: string }> {
+  need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');
+  const r = await fetch(`${PP}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${Buffer.from(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`).toString('base64')}` },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code }),
+  });
+  if (!r.ok) throw new Error(`PayPal login failed (${r.status}). The code may be used or expired; try again.`);
+  const { access_token } = (await r.json()) as { access_token: string };
+  const u = await fetch(`${PP}/v1/identity/oauth2/userinfo?schema=paypalv1.1`, { headers: { Authorization: `Bearer ${access_token}` } });
+  if (!u.ok) throw new Error(`PayPal profile lookup failed (${u.status}).`);
+  const d = (await u.json()) as { user_id?: string; payer_id?: string; name?: string; given_name?: string; family_name?: string; emails?: { value: string }[] };
+  const user = d.payer_id ?? d.user_id;
+  if (!user) throw new Error('PayPal did not return a user id.');
+  const name = (d.name ?? [d.given_name, d.family_name].filter(Boolean).join(' ')) || d.emails?.[0]?.value || 'PayPal user';
+  return { user, name: name.slice(0, 60) };
+}
+
+// Stateless signed session: payload.signature. shortcut: no revocation before expiry; store sessions when that matters.
+// Without SESSION_SECRET (local dev) sessions last until the server restarts.
+const SECRET = env.SESSION_SECRET || randomBytes(32).toString('hex');
+const sign = (p: string) => createHmac('sha256', SECRET).update(p).digest('base64url');
+export function newSession(s: { user: string; name: string }) {
+  const p = Buffer.from(JSON.stringify({ ...s, exp: Date.now() + 30 * 864e5 })).toString('base64url');
+  return `${p}.${sign(p)}`;
+}
+export function readSession(token: string): { user: string; name: string } | null {
+  const [p, sig = ''] = token.split('.');
+  if (!p || sig.length !== sign(p).length || !timingSafeEqual(Buffer.from(sig), Buffer.from(sign(p)))) return null;
+  const s = JSON.parse(Buffer.from(p, 'base64url').toString()) as { user: string; name: string; exp: number };
+  return s.exp > Date.now() ? { user: s.user, name: s.name } : null;
 }
 
 /** One order per member share. PayPal-Request-Id makes a retry return the same order (invariant 4). */

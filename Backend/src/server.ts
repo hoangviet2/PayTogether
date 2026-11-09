@@ -41,11 +41,17 @@ async function body<T>(req: IncomingMessage, schema: z.ZodType<T>): Promise<T> {
   return parsed.data;
 }
 
-/** shortcut: the acting member comes from a header the web app sets ("acting as" switcher).
- * Replace with a Log in with PayPal session before real users; until then anyone can act as any member. */
+/** Who is calling: the signed session from Log in with PayPal (x-session header). */
+function session(req: IncomingMessage) {
+  const s = ext.readSession(String(req.headers['x-session'] ?? ''));
+  if (!s) throw new HttpError(401, 'Log in with PayPal first.');
+  return s;
+}
+
+/** The caller's seat in this trip; only members can read or change it. */
 function member(req: IncomingMessage, t: Trip) {
-  const m = Number(req.headers['x-member']);
-  if (!Number.isInteger(m) || m < 0 || m >= t.members.length) throw new HttpError(403, 'Pick which member you are.');
+  const m = store.memberOf(t, session(req).user);
+  if (m < 0) throw new HttpError(403, 'You are not in this trip. Ask a member for its join code.');
   return m;
 }
 
@@ -67,20 +73,38 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   if (ACCESS_TOKEN && !open && !safeEqual(String(req.headers['x-access-token'] ?? ''), ACCESS_TOKEN)) throw new HttpError(401, 'Missing or wrong access token.');
 
   if (a === 'config' && is('GET', 2))
-    return send({ paypalClientId: ext.ready.paypal ? process.env.PAYPAL_CLIENT_ID : null, ready: ext.ready });
+    return send({ paypalClientId: ext.ready.paypal ? process.env.PAYPAL_CLIENT_ID : null, paypalLogin: ext.loginUrl(), ready: ext.ready });
 
-  if (a === 'trips' && is('GET', 2))
-    return send([...store.trips.values()].map((t) => ({ id: t.id, name: t.name, phase: t.phase, members: t.members, destinations: t.destinations, window: t.window })));
+  if (a === 'auth' && b === 'paypal' && is('POST', 3)) {
+    const { code } = await body(req, z.object({ code: z.string().min(1).max(2000) }));
+    const u = await ext.paypalUser(code).catch((e) => { throw e instanceof ext.NotConfigured ? e : new HttpError(401, e.message); });
+    return send({ session: ext.newSession(u), ...u });
+  }
+
+  if (a === 'join' && is('POST', 2)) {
+    const u = session(req);
+    const { code } = await body(req, z.object({ code: z.string().trim().min(1).max(12) }));
+    const t = store.byCode(code) ?? (() => { throw new HttpError(404, 'No trip has that code. Check it with whoever sent it.'); })();
+    store.join(t, u.name, u.user);
+    persist();
+    return send(t);
+  }
+
+  if (a === 'trips' && is('GET', 2)) {
+    const { user } = session(req);
+    return send([...store.trips.values()].filter((t) => store.memberOf(t, user) >= 0).map((t) => ({ id: t.id, name: t.name, phase: t.phase, members: t.members, destinations: t.destinations, window: t.window })));
+  }
 
   if (a === 'trips' && is('POST', 2)) {
-    const i = await body(req, z.object({ name, currency: z.enum(['USD', 'EUR', 'GBP']), members: z.array(name).min(1).max(8) }));
-    return send(store.createTrip(i.name, i.currency, i.members), 201);
+    const u = session(req);
+    const i = await body(req, z.object({ name, currency: z.enum(['USD', 'EUR', 'GBP']) }));
+    return send(store.createTrip(i.name, i.currency, [u.name], u.user), 201); // friends join with the trip's code
   }
 
   if (a === 'trips' && b) {
     const t = tripOr404(b);
-    if (is('GET', 3)) return send(t);
     const m = member(req, t);
+    if (is('GET', 3)) return send(t);
 
     if (c === 'messages' && is('POST', 4)) {
       const { text } = await body(req, z.object({ text: z.string().trim().min(1).max(2000) }));

@@ -25,6 +25,8 @@ services:
         value: /var/data/data.json
       - key: ACCESS_TOKEN
         generateValue: true
+      - key: SESSION_SECRET # signs Log in with PayPal sessions; changing it logs everyone out
+        generateValue: true
       - key: PAYPAL_ENV
         value: sandbox
       - key: OPENAI_API_KEY
