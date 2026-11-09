@@ -7,7 +7,7 @@ import { parseQuery, type Person, type Txn } from '../../FrontEnd/shared/trip.ts
 
 const env = process.env;
 export const ready = {
-  claude: !!(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_PROFILE),
+  ai: !!env.OPENAI_API_KEY,
   paypal: !!(env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET),
   paypalWebhook: !!env.PAYPAL_WEBHOOK_ID,
   channel3: !!env.CHANNEL3_API_KEY,

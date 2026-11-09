@@ -27,7 +27,7 @@ services:
         generateValue: true
       - key: PAYPAL_ENV
         value: sandbox
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false

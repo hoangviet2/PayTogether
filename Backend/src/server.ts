@@ -20,10 +20,10 @@ class HttpError extends Error {
 
 const persist = () => store.save();
 const reindex = (t: Trip, rows: Txn[]) => rows.forEach((r) => ext.indexTxn(t.id, r, t.members).catch((e) => console.error('Elastic index failed:', e.message)));
-const OFFLINE = 'I am offline: set ANTHROPIC_API_KEY in Backend/.env and restart the server.';
+const OFFLINE = 'I am offline: set OPENAI_API_KEY in Backend/.env and restart the server.';
 const wayfinder = (t: Trip, trigger: string | null) => {
   if (!trigger) return;
-  if (!ext.ready.claude) {
+  if (!ext.ready.ai) {
     if (!t.chat.some((c) => c.text === OFFLINE)) store.say(t, 'ai', OFFLINE); // once per trip, not after every message
     return persist();
   }
@@ -87,7 +87,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       store.say(t, m, text);
       persist();
       send(t);
-      if (!ext.ready.claude || (await shouldReply(t, text).catch(() => /wayfinder/i.test(text)))) wayfinder(t, `${t.members[m].name} said: ${text}`);
+      if (!ext.ready.ai || (await shouldReply(t, text).catch(() => /wayfinder/i.test(text)))) wayfinder(t, `${t.members[m].name} said: ${text}`);
       return;
     }
     if (c === 'confirm' && is('POST', 4)) {
