@@ -1,24 +1,27 @@
 import { useRef, useState, type FormEvent, type Ref } from 'react';
-import { members, displayName, eur, legs, legOf, largestRemainder, mayGrid, planned, trip, ME, type Tx } from '../../shared/trip';
+import { addDays, daysBetween, equalBps, largestRemainder, money, type Trip, type Txn } from '../../shared/trip';
+import type { Ctx } from './api';
 import { Chip, Icon, icons } from './ui';
 
-const DAYS = Array.from({ length: trip.lastDay - trip.firstDay + 1 }, (_, k) => trip.firstDay + k);
 const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const weekday = (d: number) => WEEK[new Date(Date.UTC(2027, 4, d)).getUTCDay()];
-const cols = `170px repeat(${DAYS.length}, minmax(84px, 1fr))`;
+const weekday = (iso: string) => WEEK[new Date(iso + 'T00:00:00Z').getUTCDay()];
+const short = (iso: string) => `${weekday(iso)} ${Number(iso.slice(8))}`;
+const legOn = (t: Trip, d: string) => t.legs.find((l) => d >= l.arrive_date && d < l.depart_date)?.destination.name ?? null;
 
-const evtStyle = (t: Tx) => {
-  const c = members[t.member].color;
-  if (t.status === 'logged' || t.source !== 'Prepaid share') return { background: '#fff', borderColor: c, color: c };
-  if (t.status === 'captured') return { background: members[t.member].tint, borderColor: c, color: '#012169' };
+const evtStyle = (t: Txn, c: string, tint: string) => {
+  if (t.source !== 'Prepaid share') return { background: '#fff', borderColor: c, color: c };
+  if (t.status === 'captured') return { background: tint, borderColor: c, color: '#012169' };
   return { background: '#fff', borderColor: c, borderStyle: 'dashed', color: '#012169' };
 };
 
-export function Schedule({ txs, addTx }: { txs: Tx[]; addTx: (t: Tx) => void }) {
+export function Schedule({ ctx }: { ctx: Ctx }) {
+  const { trip } = ctx;
   const [view, setView] = useState<'timeline' | 'calendar'>('timeline');
-  const [logDay, setLogDay] = useState(18);
+  const [logDay, setLogDay] = useState(trip.window?.start ?? '');
   const dlg = useRef<HTMLDialogElement>(null);
-  const openLog = (d: number) => { setLogDay(d); dlg.current?.showModal(); };
+  if (!trip.window) return <section className="card"><h2 style={{ fontSize: 20 }}>Schedule</h2><p className="muted">The schedule appears once the group confirms dates with Wayfinder.</p></section>;
+  const days = Array.from({ length: daysBetween(trip.window.start, trip.window.end) + 1 }, (_, k) => addDays(trip.window!.start, k));
+  const openLog = (d: string) => { setLogDay(d); dlg.current?.showModal(); };
 
   return (
     <section className="card">
@@ -32,50 +35,53 @@ export function Schedule({ txs, addTx }: { txs: Tx[]; addTx: (t: Tx) => void }) 
             <button type="button" aria-pressed={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</button>
             <button type="button" aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}>Calendar</button>
           </div>
-          <button type="button" className="btn btn-primary" onClick={() => openLog(logDay)}><Icon d={icons.plus} />Log expense</button>
+          <button type="button" className="btn btn-primary" onClick={() => openLog(logDay || days[0])}><Icon d={icons.plus} />Log expense</button>
         </div>
       </div>
-      {view === 'timeline' ? <Timeline txs={txs} onLog={openLog} /> : <Calendar txs={txs} />}
-      <LogExpense ref={dlg} day={logDay} onSave={(rows) => { rows.forEach(addTx); dlg.current?.close(); }} onCancel={() => dlg.current?.close()} />
+      {view === 'timeline' ? <Timeline ctx={ctx} days={days} onLog={openLog} /> : <Calendar trip={trip} days={days} />}
+      <LogExpense ref={dlg} ctx={ctx} day={logDay} onDone={() => dlg.current?.close()} />
     </section>
   );
 }
 
-function Timeline({ txs, onLog }: { txs: Tx[]; onLog: (d: number) => void }) {
-  const place = (day: number, span = 1) => ({ gridColumn: `${day - trip.firstDay + 1} / span ${Math.min(span, trip.lastDay - day + 1)}` });
-  const lane = { gridColumn: '2 / -1', display: 'grid', gridTemplateColumns: `repeat(${DAYS.length}, minmax(0, 1fr))`, gridAutoFlow: 'dense' as const, alignContent: 'center', gap: 4, padding: '6px 0' };
+function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: string) => void }) {
+  const { trip, me } = ctx;
+  const cols = `170px repeat(${days.length}, minmax(84px, 1fr))`;
+  const place = (d: string, span = 1) => {
+    const k = Math.max(0, days.indexOf(d));
+    return { gridColumn: `${k + 1} / span ${Math.max(1, Math.min(span, days.length - k))}` };
+  };
+  const lane = { gridColumn: '2 / -1', display: 'grid', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`, gridAutoFlow: 'dense' as const, alignContent: 'center', gap: 4, padding: '6px 0' };
   return (
     <>
       <div className="table-box">
-        <div style={{ minWidth: 1000, fontSize: 13 }}>
+        <div style={{ minWidth: 170 + days.length * 84, fontSize: 13 }}>
           <div style={{ display: 'grid', gridTemplateColumns: cols, background: 'var(--bg)', borderBottom: '1px solid var(--line)' }}>
-            <span className="who" style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--body)' }}>Who</span>
-            {DAYS.map((d) => <span key={d} style={{ padding: 10, fontWeight: 600, color: 'var(--body)' }}>{weekday(d)} {d}</span>)}
+            <span style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--body)' }}>Who</span>
+            {days.map((d) => <span key={d} style={{ padding: 10, fontWeight: 600, color: 'var(--body)' }}>{short(d)}</span>)}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: cols, borderBottom: '1px solid var(--line-2)' }}>
             <span style={{ padding: '10px 12px', fontWeight: 600 }}>Group · legs</span>
             <div style={lane}>
-              {legs.map((l) => (
-                <span key={l.name} className={`evt tone-${l.tone}`} style={{ ...place(l.from, l.nights + (l.to === trip.lastDay ? 1 : 0)), borderColor: 'transparent' }}>
-                  {l.name} · {l.nights} nights{l.tone === 'gray' ? ' · stay poll open' : ''}
+              {trip.legs.map((l, k) => (
+                <span key={l.id} className={`evt ${['tone-blue', 'tone-orange', 'tone-gray'][k % 3]}`} style={{ ...place(l.arrive_date, l.nights), borderColor: 'transparent' }}>
+                  {l.destination.name} · {l.nights} nights
                 </span>
               ))}
+              {!trip.legs.length && <span className="small muted" style={{ gridColumn: '1 / -1', padding: '0 8px' }}>No legs yet</span>}
             </div>
           </div>
-          {members.map((m, i) => (
-            <div key={m.id} style={{ display: 'grid', gridTemplateColumns: cols, borderBottom: '1px solid var(--line-2)', minHeight: 56, background: m.me ? 'var(--bg)' : undefined }}>
-              <span className="row" style={{ padding: '10px 12px', gap: 8, fontWeight: 600 }}><Chip i={i} size={24} />{displayName(i)}</span>
-              <div
-                style={{ ...lane, cursor: m.me ? 'copy' : undefined }}
-                onDoubleClick={m.me ? (e) => {
+          {trip.members.map((m, i) => (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: cols, borderBottom: '1px solid var(--line-2)', minHeight: 56, background: i === me ? 'var(--bg)' : undefined }}>
+              <span className="row" style={{ padding: '10px 12px', gap: 8, fontWeight: 600 }}><Chip p={m} size={24} />{m.name}{i === me ? ' (you)' : ''}</span>
+              <div style={{ ...lane, cursor: i === me ? 'copy' : undefined }}
+                onDoubleClick={i === me ? (e) => {
                   const r = e.currentTarget.getBoundingClientRect();
-                  onLog(trip.firstDay + Math.floor(((e.clientX - r.left) / r.width) * DAYS.length));
-                } : undefined}
-              >
-                {txs.filter((t) => t.member === i).map((t, k) => (
-                  <span key={k} className="evt" style={{ ...place(t.day, t.nights), ...evtStyle(t) }} title={`${t.vendor} · ${eur(t.amount)} · ${t.status}`}>
-                    {t.vendor} · {eur(t.amount)}
-                    {t.status === 'created' && ' · unpaid'}
+                  onLog(days[Math.min(days.length - 1, Math.floor(((e.clientX - r.left) / r.width) * days.length))]);
+                } : undefined}>
+                {trip.txs.filter((t) => t.member === i && t.status !== 'failed').map((t) => (
+                  <span key={t.id} className="evt" style={{ ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }} title={`${t.vendor} · ${money(t.amount, trip.currency)} · ${t.status}`}>
+                    {t.vendor} · {money(t.amount, trip.currency)}{t.status === 'created' && ' · unpaid'}
                   </span>
                 ))}
               </div>
@@ -84,81 +90,76 @@ function Timeline({ txs, onLog }: { txs: Tx[]; onLog: (d: number) => void }) {
         </div>
       </div>
       <div className="row small muted" style={{ flexWrap: 'wrap', gap: 16 }}>
-        <span className="row" style={{ gap: 6 }}><span className="evt" style={{ width: 20, height: 12, padding: 0, background: '#EEDFF9', borderColor: '#7E22CE' }} />Paid prepaid share</span>
-        <span className="row" style={{ gap: 6 }}><span className="evt" style={{ width: 20, height: 12, padding: 0, borderColor: '#7E22CE', borderStyle: 'dashed' }} />Collecting</span>
-        <span className="row" style={{ gap: 6 }}><span className="evt" style={{ width: 20, height: 12, padding: 0, background: '#fff', borderColor: '#5B6068' }} />On-trip log or online purchase</span>
+        <span>Solid fill: paid prepaid share · dashed: collecting · outline: on-trip log or online purchase.</span>
         <span>Other members’ rows are read-only.</span>
       </div>
     </>
   );
 }
 
-function Calendar({ txs }: { txs: Tx[] }) {
-  const [sel, setSel] = useState(17);
-  const dayEvents = (d: number) => {
-    const byVendor = new Map<string, Tx[]>();
-    txs.filter((t) => t.day === d).forEach((t) => byVendor.set(t.vendor, [...(byVendor.get(t.vendor) ?? []), t]));
-    return [...byVendor.entries()].map(([vendor, rows]) => ({
-      vendor, rows,
-      who: rows.length > 1 ? null : rows[0].member,
-      label: `${vendor} · ${eur(rows.reduce((a, t) => a + t.amount, 0))}`,
-    }));
-  };
-  const items = txs.filter((t) => t.day === sel);
-  const extra = planned.filter((p) => p.day === sel);
+/** Month grids covering the trip window, Sun-first. */
+function months(days: string[]) {
+  const firsts = [...new Set(days.map((d) => d.slice(0, 7)))];
+  return firsts.map((ym) => {
+    const first = `${ym}-01`;
+    const lead = new Date(first + 'T00:00:00Z').getUTCDay();
+    return { ym, cells: Array.from({ length: 42 }, (_, k) => addDays(first, k - lead)) };
+  });
+}
+
+function Calendar({ trip, days }: { trip: Trip; days: string[] }) {
+  const [sel, setSel] = useState(days[0]);
+  const items = trip.txs.filter((t) => t.date === sel && t.status !== 'failed');
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
       <div style={{ flex: '3 1 560px', minWidth: 0 }} className="col">
-        <h3 style={{ fontSize: 18, marginBottom: 8 }}>May 2027</h3>
-        <div className="cal" role="grid" aria-label="May 2027">
-          {WEEK.map((w) => <span key={w} className="small muted" style={{ fontWeight: 600, padding: 4 }}>{w}</span>)}
-          {mayGrid().map((c, k) => {
-            const evs = c.inMonth ? dayEvents(c.day) : [];
-            const plans = c.inMonth ? planned.filter((p) => p.day === c.day) : [];
-            const leg = c.inMonth && c.day >= trip.firstDay && c.day <= trip.lastDay ? legOf(c.day) : null;
-            return (
-              <button key={k} type="button" className={c.inMonth ? '' : 'out'} disabled={!c.inMonth} aria-pressed={c.inMonth && c.day === sel}
-                aria-label={`${c.inMonth ? 'May' : c.day > 20 ? 'April' : 'June'} ${c.day}${evs.length ? `, ${evs.length} items` : ''}`}
-                onClick={() => setSel(c.day)}>
-                <span className="row" style={{ justifyContent: 'space-between', gap: 4 }}>
-                  <strong style={{ fontSize: 13 }}>{c.day}</strong>
-                  {leg && <span className="muted" style={{ fontSize: 11 }}>{leg}</span>}
-                </span>
-                {evs.map((e) => (
-                  <span key={e.vendor} className="tag" style={{ background: e.who === null ? 'var(--blue-tint)' : members[e.who].tint }}>
-                    {e.who === null ? '◆▲●★' : members[e.who].symbol} {e.label}
-                  </span>
-                ))}
-                {plans.map((p) => <span key={p.title} className="tag" style={{ border: '1px dashed var(--brand)' }}>{p.title.split(' —')[0]}</span>)}
-              </button>
-            );
-          })}
-        </div>
+        {months(days).map(({ ym, cells }) => (
+          <div key={ym} className="col" style={{ gap: 8 }}>
+            <h3 style={{ fontSize: 18 }}>{new Date(ym + '-01T00:00:00Z').toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</h3>
+            <div className="cal" role="grid" aria-label={ym}>
+              {WEEK.map((w) => <span key={w} className="small muted" style={{ fontWeight: 600, padding: 4 }}>{w}</span>)}
+              {cells.map((d) => {
+                const inMonth = d.startsWith(ym);
+                const evs = inMonth ? trip.txs.filter((t) => t.date === d && t.status !== 'failed') : [];
+                const vendors = [...new Set(evs.map((t) => t.vendor))];
+                const leg = inMonth ? legOn(trip, d) : null;
+                return (
+                  <button key={d} type="button" className={inMonth ? '' : 'out'} disabled={!inMonth} aria-pressed={d === sel}
+                    aria-label={`${d}${evs.length ? `, ${evs.length} items` : ''}`} onClick={() => setSel(d)}>
+                    <span className="row" style={{ justifyContent: 'space-between', gap: 4 }}>
+                      <strong style={{ fontSize: 13 }}>{Number(d.slice(8))}</strong>
+                      {leg && <span className="muted" style={{ fontSize: 11 }}>{leg}</span>}
+                    </span>
+                    {vendors.map((v) => {
+                      const rows = evs.filter((t) => t.vendor === v);
+                      const who = new Set(rows.map((t) => t.member));
+                      return (
+                        <span key={v} className="tag" style={{ background: who.size > 1 ? 'var(--blue-tint)' : trip.members[rows[0].member].tint }}>
+                          {[...who].map((i) => trip.members[i].symbol).join('')} {v} · {money(rows.reduce((a, t) => a + t.amount, 0), trip.currency)}
+                        </span>
+                      );
+                    })}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
       <aside className="card" style={{ flex: '1 1 280px', background: 'var(--bg)', padding: 18 }}>
         <div className="col">
-          <h3 style={{ fontSize: 18 }}>{weekday(sel)}, May {sel}</h3>
-          <span className="small muted">{legOf(sel) && sel <= trip.lastDay && sel >= trip.firstDay ? `${legOf(sel)} · ${items.length + extra.length} items` : 'Outside the trip'}</span>
+          <h3 style={{ fontSize: 18 }}>{short(sel)}</h3>
+          <span className="small muted">{legOn(trip, sel) ?? 'Travel day'} · {items.length} items</span>
         </div>
-        {items.length + extra.length === 0 && <p className="small muted">No transactions on this day. Double-click a day in your row on Timeline, or use Log expense.</p>}
-        {items.map((t, k) => (
-          <div key={k} className="row" style={{ alignItems: 'flex-start' }}>
-            <Chip i={t.member} size={28} />
+        {items.length === 0 && <p className="small muted">No transactions on this day.</p>}
+        {items.map((t) => (
+          <div key={t.id} className="row" style={{ alignItems: 'flex-start' }}>
+            <Chip p={trip.members[t.member]} size={28} />
             <div className="col" style={{ flex: 1, minWidth: 0 }}>
-              <strong style={{ fontSize: 14 }}>{t.vendor}{t.source === 'Prepaid share' ? ` — ${t.member === ME ? 'your' : `${members[t.member].name}’s`} share` : ''}</strong>
-              <span className="small muted">{t.time} · {t.source} · {t.status}</span>
+              <strong style={{ fontSize: 14 }}>{t.vendor}{t.source === 'Prepaid share' ? ` — ${trip.members[t.member].name}’s share` : ''}</strong>
+              <span className="small muted">{t.time} · {t.source} · {t.status}{t.paid_by !== t.member ? ` · paid by ${trip.members[t.paid_by].name}` : ''}</span>
             </div>
-            <span className="mono small">{eur(t.amount)}</span>
-          </div>
-        ))}
-        {extra.map((p) => (
-          <div key={p.title} className="row" style={{ alignItems: 'flex-start' }}>
-            <span className="chip" style={{ width: 28, height: 28, background: 'var(--brand)', fontSize: 12 }}>◆</span>
-            <div className="col" style={{ flex: 1 }}>
-              <strong style={{ fontSize: 14 }}>{p.title}</strong>
-              <span className="small muted">{p.meta}</span>
-            </div>
-            <span className="mono small">{p.amount === null ? '—' : eur(p.amount)}</span>
+            <span className="mono small">{money(t.amount, trip.currency)}</span>
           </div>
         ))}
       </aside>
@@ -166,28 +167,26 @@ function Calendar({ txs }: { txs: Tx[] }) {
   );
 }
 
-function LogExpense({ ref, day, onSave, onCancel }: { ref: Ref<HTMLDialogElement>; day: number; onSave: (t: Tx[]) => void; onCancel: () => void }) {
+function LogExpense({ ref, ctx, day, onDone }: { ref: Ref<HTMLDialogElement>; ctx: Ctx; day: string; onDone: () => void }) {
+  const { trip, me, act } = ctx;
   const [amount, setAmount] = useState('');
   const [mode, setMode] = useState<'me' | 'equal'>('equal');
-  const [picked, setPicked] = useState<number[]>([0, 1, 2, 3]);
+  const [picked, setPicked] = useState<number[]>(trip.members.map((_, i) => i));
   const cents = Math.round(parseFloat(amount) * 100);
   const valid = Number.isFinite(cents) && cents > 0;
-  const who = mode === 'me' ? [ME] : picked;
+  const who = mode === 'me' ? [me] : picked;
   const shares = valid && who.length ? largestRemainder(cents, who.map(() => 1)) : [];
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
     if (!valid || !who.length) return;
-    const leg = legOf(day) ?? 'Barcelona';
-    // One transactions row per member per money event (claudee.md conventions).
-    onSave(who.map((member, k) => ({
-      member, day, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor') || 'Expense').trim(), type: String(f.get('type')),
-      leg: `${leg} · leg ${legs.findIndex((l) => l.name === leg) + 1}`, amount: shares[k], total: cents,
-      shareBp: largestRemainder(10000, who.map(() => 1))[k], source: 'On-trip log', status: 'logged',
-    })));
+    const f = new FormData(e.currentTarget);
+    const eq = equalBps(who.length);
+    const bps = trip.members.map((_, i) => (who.includes(i) ? eq[who.indexOf(i)] : 0));
+    await act('/txns', { date: day, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, bps });
     e.currentTarget.reset();
     setAmount('');
+    onDone();
   };
 
   return (
@@ -195,17 +194,17 @@ function LogExpense({ ref, day, onSave, onCancel }: { ref: Ref<HTMLDialogElement
       <form onSubmit={submit} className="col" style={{ gap: 14 }}>
         <div className="col">
           <h2 id="log-h" style={{ fontSize: 20 }}>Log expense</h2>
-          <span className="small muted">{weekday(day)} {day} · {legOf(day)}</span>
+          <span className="small muted">{day && `${short(day)} · ${legOn(trip, day) ?? ''}`}</span>
         </div>
-        <label className="field">Vendor<input name="vendor" required /></label>
+        <label className="field">Vendor<input name="vendor" required maxLength={60} /></label>
         <div className="row" style={{ alignItems: 'flex-end' }}>
           <label className="field" style={{ flex: 1 }}>Type
             <select name="type">{['Restaurant', 'Hotel', 'Store', 'Transport', 'Other'].map((t) => <option key={t}>{t}</option>)}</select>
           </label>
-          <label className="field" style={{ flex: 1 }}>Amount (EUR)<input name="amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} pattern="\d+(\.\d{1,2})?" /></label>
+          <label className="field" style={{ flex: 1 }}>Amount ({trip.currency})<input name="amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} pattern="\d+(\.\d{1,2})?" /></label>
           <label className="field" style={{ width: 110 }}>Time<input name="time" type="time" defaultValue="20:00" /></label>
         </div>
-        <div className="field">Who paid<span className="row" style={{ fontWeight: 400, fontSize: 15, color: 'var(--ink)' }}><Chip i={ME} size={24} />{displayName(ME)}</span></div>
+        <div className="field">Who paid<span className="row" style={{ fontWeight: 400, fontSize: 15, color: 'var(--ink)' }}><Chip p={trip.members[me]} size={24} />{trip.members[me].name} (you)</span></div>
         <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
           <legend className="field" style={{ marginBottom: 6 }}>Split with</legend>
           <div role="group" className="seg" style={{ alignSelf: 'flex-start' }}>
@@ -213,9 +212,9 @@ function LogExpense({ ref, day, onSave, onCancel }: { ref: Ref<HTMLDialogElement
             <button type="button" aria-pressed={mode === 'equal'} onClick={() => setMode('equal')}>Equal among selected</button>
           </div>
           {mode === 'equal' && (
-            <div className="row" style={{ gap: 8 }}>
-              {members.map((m, i) => (
-                <label key={m.id} className="row" style={{ gap: 4, fontSize: 14, minHeight: 44 }}>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+              {trip.members.map((m, i) => (
+                <label key={i} className="row" style={{ gap: 4, fontSize: 14, minHeight: 44 }}>
                   <input type="checkbox" checked={picked.includes(i)} onChange={() => setPicked((p) => (p.includes(i) ? p.filter((x) => x !== i) : [...p, i].sort()))} />
                   <span style={{ color: m.color }}>{m.symbol}</span>{m.name}
                 </label>
@@ -223,11 +222,11 @@ function LogExpense({ ref, day, onSave, onCancel }: { ref: Ref<HTMLDialogElement
             </div>
           )}
           <span className="small muted">
-            {who.length} selected{valid && who.length ? ` · ${eur(shares[0])}${new Set(shares).size > 1 ? ' or less' : ''} each` : ''}. Each person’s share is charged to their PayPal automatically.
+            {who.length} selected{valid && who.length ? ` · ${money(shares[0], trip.currency)}${new Set(shares).size > 1 ? ' or less' : ''} each` : ''}. You paid; the others owe you their share (see Dashboard → settle up).
           </span>
         </fieldset>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
-          <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn" onClick={onDone}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={!valid || !who.length}>Save expense</button>
         </div>
       </form>

@@ -3,7 +3,7 @@
 // shortcut: sample data stands in for the Backend API, replace with fetches once Backend exists.
 
 export type Member = { id: string; name: string; symbol: string; color: string; tint: string; me?: boolean };
-export type TxStatus = 'captured' | 'approved' | 'created' | 'logged';
+export type TxStatus = 'captured' | 'approved' | 'created' | 'logged' | 'failed';
 export type Tx = {
   member: number; // index into members
   day: number; // day of May 2027
@@ -172,13 +172,16 @@ export function billView(b: Bill) {
 // ---------- search (client stand-in for the Elasticsearch query) ----------
 
 /** "hotel > 100" → every word must match a text field; "> N" / "< N" filter by amount in euros. */
-export function searchTxs(txs: Tx[], query: string): Tx[] {
+export function parseQuery(query: string) {
   const range: { op: '>' | '<'; cents: number }[] = [];
-  const text = query.replace(/([<>])\s*€?\s*(\d+(?:\.\d{1,2})?)/g, (_, op, n) => {
+  const text = query.replace(/([<>])\s*[€$£]?\s*(\d+(?:\.\d{1,2})?)/g, (_, op, n) => {
     range.push({ op, cents: Math.round(parseFloat(n) * 100) });
     return ' ';
   });
-  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  return { words: text.toLowerCase().split(/\s+/).filter(Boolean), range };
+}
+export function searchTxs(txs: Tx[], query: string): Tx[] {
+  const { words, range } = parseQuery(query);
   return txs.filter((t) => {
     const hay = [members[t.member].name, t.vendor, t.type, t.leg, t.source, t.status].join(' ').toLowerCase();
     return words.every((w) => hay.includes(w)) && range.every((r) => (r.op === '>' ? t.amount > r.cents : t.amount < r.cents));
@@ -216,3 +219,189 @@ export function mayGrid() {
     return d >= 1 && d <= 31 ? { day: d, inMonth: true } : { day: d < 1 ? 30 + d : d - 31, inMonth: false };
   });
 }
+
+// ---------- Wayfinder (client stand-in for the server-side Claude turn, ai.md §3 and §6) ----------
+
+/**
+ * Reply text, or null to stay silent. Speaks only when @mentioned (ai.md §3); never moves money or edits splits (§6.1–2);
+ * every amount comes from trip data, never invented (§6.6).
+ * shortcut: keyword routing instead of Claude + tools; replace with a Backend call once the API exists (the key can't ship in clients).
+ */
+export function wayfinderReply(text: string, txs: Tx[], vote: string | null): string | null {
+  const t = text.toLowerCase();
+  if (!/\bwayfinder\b/.test(t)) return null;
+  if (/\b(pay|refund|transfer|send money|charge)\b/.test(t))
+    return "I can't move money. Each of you approves your own share in PayPal — tap Pay my share on the bill in Split bills.";
+  if (/\b(split|share|bar|ratio)s?\b/.test(t))
+    return 'Only you can change your own bar, in Split bills. Any change resets everyone\'s acceptance, and the trip owner can reset all to equal.';
+  if (/\b(spent|spend|balance|owe|total|money)\b/.test(t)) {
+    const sm = summarize(txs);
+    return `So far: ${members.map((m, i) => `${m.name} ${eur(sm.byMember[i])}`).join(', ')} — ${eur(sm.total)} in total. ${eur(sm.pending)} is still waiting on PayPal.`;
+  }
+  if (/\b(poll|vote|barcelona|stay)\b/.test(t)) {
+    const votes = pollOptions.map((o) => o.voters.length + (vote === o.id ? 1 : 0));
+    const voted = votes.reduce((a, b) => a + b, 0);
+    const lead = pollOptions.map((o, k) => `${o.name} ${votes[k]}`).join(', ');
+    return `🏨 Barcelona stay poll: ${voted} of ${members.length} have voted (${lead}). It closes Fri 6:00 PM. Prices are estimates until booking.`;
+  }
+  if (/\b(schedule|timeline|plan|when|where|nights?|itinerary)\b/.test(t))
+    return `${trip.dates}: ${legs.map((l) => `${l.name} ${l.nights} nights${l.transport ? ` (${l.transport} in)` : ''}`).join(' → ')}.`;
+  return 'I can help with the schedule, who has spent what, or the Barcelona poll. What do you need?';
+}
+
+// ========== Live trip model (web + Backend) ==========
+// A first-time trip starts empty and walks the ai.md §2 phases. Backend owns the state; the web renders it.
+
+export type Phase = 'DESTINATIONS' | 'TIMELINE' | 'PLACES' | 'PRICING' | 'BOOKED' | 'ON_TRIP' | 'SETTLED';
+export const PHASES: Phase[] = ['DESTINATIONS', 'TIMELINE', 'PLACES', 'PRICING', 'BOOKED', 'ON_TRIP', 'SETTLED'];
+export const PHASE_LABEL: Record<Phase, string> = {
+  DESTINATIONS: 'Destinations', TIMELINE: 'Timeline', PLACES: 'Places', PRICING: 'Pricing', BOOKED: 'Booked', ON_TRIP: 'On trip', SETTLED: 'Settled',
+};
+export type Person = { name: string; symbol: string; color: string; tint: string };
+/** Color + symbol per member slot, never color alone (invariant 10). */
+export const PALETTE: Omit<Person, 'name'>[] = [
+  ...members.map(({ symbol, color, tint }) => ({ symbol, color, tint })),
+  { symbol: '■', color: '#1D4ED8', tint: '#DBE7FB' },
+  { symbol: '◗', color: '#0F766E', tint: '#D5F0EC' },
+  { symbol: '✚', color: '#B91C1C', tint: '#F9DEDE' },
+  { symbol: '⬟', color: '#4D7C0F', tint: '#E4F0D3' },
+];
+export type Transport = 'flight' | 'train' | 'drive' | 'ferry' | 'none';
+export type Leg = { id: string; destination: { name: string; country: string }; nights: number; arrive_date: string; depart_date: string; transport_hint?: Transport };
+export type PlacePrice = { amount_cents: number; currency: string; unit: 'per_night' | 'total' | 'per_person' };
+export type PlaceOption = {
+  id: string; name: string; address?: string; price: PlacePrice | null; rating?: number;
+  source: 'web_search' | 'member_added' | 'channel3'; source_url?: string; why: string; added_by: number | 'ai'; voters: number[];
+};
+export type Poll = { id: string; kind: 'destination' | 'stay' | 'dining' | 'custom'; leg_id?: string; question: string; options: PlaceOption[]; status: 'open' | 'closed'; winner?: string };
+export type ShareStatus = 'none' | 'created' | 'approved' | 'captured' | 'failed';
+export type Share = { member: number; ratio_bp: number; accepted: boolean; status: ShareStatus; order_id?: string };
+export type Preview = {
+  id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining'; title: string; meta: string;
+  total_cents: number; currency: string; prepaid: boolean; shares: Share[]; frozen: boolean; is_estimate: true;
+};
+export type Txn = {
+  id: string; member: number; paid_by: number; date: string; time: string; vendor: string; type: string; leg: string;
+  amount: number; total: number; shareBp: number; source: Tx['source']; status: TxStatus; nights?: number;
+};
+export type LiveMsg = { from: number | 'ai'; at: string; text: string };
+export type Trip = {
+  id: string; name: string; currency: string; phase: Phase; members: Person[];
+  window: { start: string; end: string } | null; budget_per_person_cents?: number;
+  destinations: string[]; legs: Leg[]; polls: Poll[]; previews: Preview[]; chat: LiveMsg[]; txs: Txn[];
+  confirms: number[]; busy: boolean;
+};
+
+export const money = (cents: number, currency: string) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(cents / 100);
+
+/** ISO date + n days, UTC so time zones never shift the day. */
+export const addDays = (iso: string, n: number) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+
+/** ai.md §2.2: contiguous legs, depart = arrive + nights, total nights fit the window exactly. */
+export function validateTimeline(legs: Leg[], window: Trip['window']): string[] {
+  const errs: string[] = [];
+  if (!legs.length) return ['No legs yet.'];
+  legs.forEach((l, k) => {
+    if (l.nights < 1) errs.push(`${l.destination.name}: needs at least 1 night.`);
+    if (addDays(l.arrive_date, l.nights) !== l.depart_date) errs.push(`${l.destination.name}: depart date must be arrive date + ${l.nights} nights.`);
+    const prev = legs[k - 1];
+    if (prev && prev.depart_date !== l.arrive_date) errs.push(`Gap or overlap between ${prev.destination.name} and ${l.destination.name}.`);
+  });
+  if (window) {
+    if (legs[0].arrive_date !== window.start) errs.push(`Trip should start on ${window.start}.`);
+    if (legs[legs.length - 1].depart_date !== window.end) errs.push(`Trip should end on ${window.end}.`);
+  }
+  return errs;
+}
+
+/** Re-date legs after a nights edit, keeping the first arrival fixed. */
+export function redate(legs: Leg[]): Leg[] {
+  let at = legs[0]?.arrive_date;
+  return legs.map((l) => {
+    const leg = { ...l, arrive_date: at, depart_date: addDays(at, l.nights) };
+    at = leg.depart_date;
+    return leg;
+  });
+}
+
+export const ratioSum = (p: Preview) => p.shares.reduce((a, s) => a + s.ratio_bp, 0);
+/** Cents per share, or null while ratios don't sum to 100% (ai.md §2.4: nobody else's ratio moves). */
+export const shareAmounts = (p: Preview) => (ratioSum(p) === 10000 ? largestRemainder(p.total_cents, p.shares.map((s) => s.ratio_bp)) : null);
+export const equalBps = (n: number) => largestRemainder(10000, Array(n).fill(1));
+
+export function pollTally(p: Poll) {
+  const votes = p.options.map((o) => o.voters.length);
+  const top = Math.max(0, ...votes);
+  return { votes, voted: new Set(p.options.flatMap((o) => o.voters)).size, leaders: top ? p.options.filter((_, k) => votes[k] === top).map((o) => o.id) : [] };
+}
+
+/** Paid minus owed per member, from captured and logged rows only. */
+export function balances(txs: Txn[], n: number): number[] {
+  const out = Array(n).fill(0);
+  for (const t of txs) {
+    if (t.status !== 'captured' && t.status !== 'logged') continue;
+    out[t.paid_by] += t.amount;
+    out[t.member] -= t.amount;
+  }
+  return out;
+}
+
+/** Greedy largest-debtor → largest-creditor; at most n-1 transfers, every cent accounted for. */
+export function settle(bal: number[]): { from: number; to: number; amount: number }[] {
+  const b = bal.slice();
+  const out: { from: number; to: number; amount: number }[] = [];
+  for (;;) {
+    const d = b.indexOf(Math.min(...b));
+    const c = b.indexOf(Math.max(...b));
+    const amt = Math.min(-b[d], b[c]);
+    if (amt <= 0) return out;
+    out.push({ from: d, to: c, amount: amt });
+    b[d] += amt;
+    b[c] -= amt;
+  }
+}
+
+export function searchTxns(txs: Txn[], people: Person[], query: string): Txn[] {
+  const { words, range } = parseQuery(query);
+  return txs.filter((t) => {
+    const hay = [people[t.member]?.name, t.vendor, t.type, t.leg, t.source, t.status].join(' ').toLowerCase();
+    return words.every((w) => hay.includes(w)) && range.every((r) => (r.op === '>' ? t.amount > r.cents : t.amount < r.cents));
+  });
+}
+
+export function summarizeTrip(t: Trip) {
+  const sum = (f: (x: Txn) => boolean) => t.txs.filter(f).reduce((a, x) => a + x.amount, 0);
+  const total = sum((x) => x.status !== 'failed');
+  return {
+    total,
+    count: t.txs.length,
+    captured: sum((x) => x.status === 'captured'),
+    logged: sum((x) => x.status === 'logged'),
+    pending: sum((x) => x.status === 'approved' || x.status === 'created'),
+    prepaidTotal: t.previews.filter((p) => p.frozen).reduce((a, p) => a + p.total_cents, 0),
+    prepaidCollected: sum((x) => x.source === 'Prepaid share' && x.status === 'captured'),
+    byMember: t.members.map((_, i) => sum((x) => x.member === i && x.status !== 'failed')),
+    byType: [...new Set(t.txs.map((x) => x.type))].map((type) => ({ type, amount: sum((x) => x.type === type && x.status !== 'failed') })),
+    byLeg: t.legs.map((l) => ({ name: l.destination.name, perMember: t.members.map((_, i) => sum((x) => x.member === i && x.leg === l.destination.name && x.status !== 'failed')) })),
+  };
+}
+
+/** Why the group can't press Confirm yet, or null when it can (ai.md §2). */
+export function confirmBlocker(t: Trip): string | null {
+  switch (t.phase) {
+    case 'DESTINATIONS': return t.destinations.length && t.window ? null : 'Tell Wayfinder where and when you want to go first.';
+    case 'TIMELINE': return validateTimeline(t.legs, t.window)[0] ?? null;
+    case 'PLACES': {
+      const open = t.legs.find((l) => !t.polls.some((p) => p.kind === 'stay' && p.leg_id === l.id && p.status === 'closed' && p.winner));
+      return open ? `Pick a stay for ${open.destination.name} first.` : null;
+    }
+    case 'PRICING': return t.previews.some((p) => p.prepaid) ? 'Booking happens when every prepaid share is paid.' : null;
+    case 'SETTLED': return 'This trip is settled.';
+    default: return null;
+  }
+}
+export const CONFIRM_LABEL: Partial<Record<Phase, string>> = {
+  DESTINATIONS: 'Confirm destinations', TIMELINE: 'Confirm timeline', PLACES: 'Confirm places', PRICING: 'Confirm (nothing prepaid)', BOOKED: 'Start the trip', ON_TRIP: 'Mark trip settled',
+};

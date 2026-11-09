@@ -4,32 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-The FrontEnd has web and mobile clients built from the Claude Design canvas (https://claude.ai/artifact/7mzMmkDDNxxaebhB2YGmpa). They run on sample data in `FrontEnd/shared/trip.ts`. `Backend/` and `AI/` are still placeholders. Product rules and invariants live in `claudee.md` and `AI/ai.md`.
+The web app is a first-time flow backed by `Backend/`. A user creates a trip, tells Wayfinder (Claude) where to go in the chat, and the group walks the `AI/ai.md` phases (Destinations → Timeline → Places → Pricing → Booked → On trip → Settled). The mobile app still runs on the sample trip in `FrontEnd/shared/trip.ts`. Product rules and invariants live in `claudee.md` and `AI/ai.md`. The stack is not the Next.js/Postgres one `claudee.md` describes: it is Vite + a small node:http server with a JSON file store.
+
+## Backend (`Backend/`, port 8787)
+
+- `src/server.ts`: node:http routes under `/api`; Zod validates every body. The acting member comes from the `x-member` header (shortcut until Log in with PayPal).
+- `src/store.ts`: trip state and every rule-bearing mutation (quorum confirms, poll ties, own-split-only edits, webhook-only payment status). Persists to `Backend/data.json`.
+- `src/wayfinder.ts`: Claude turn per chat message or event via the beta tool runner. Tools are phase-gated per `ai.md` §4; places come from the `web_search` server tool. `claude-sonnet-5-5` for turns, `claude-haiku-5-5` for should-reply, with `fallbacks: "default"`.
+- `src/integrations.ts`: PayPal Orders v2 + webhook verification, Channel3, Kernel, Elasticsearch. Each one is off (HTTP 503 naming the missing variable) until its keys are in `Backend/.env`; see `.env.example`.
+- Payment status changes only in `POST /api/paypal/webhook`, so local dev needs a public tunnel to receive PayPal webhooks.
+- Deploy: `render.yaml` (Render Blueprint) builds from the repo root because the server imports `FrontEnd/shared/`. It uses a paid instance with a disk at `/var/data` (`DATA_FILE`), since free instances wipe the filesystem. `ACCESS_TOKEN` gates every route except `/api/config` and the PayPal webhook; the web dev proxy sends it from `FrontEnd/web/.env.local` (`API_URL`, `API_TOKEN`).
 
 ## FrontEnd
 
-- `FrontEnd/shared/trip.ts`: plain TS with no imports and no deps. It holds the sample trip, the integer-cents split math (largest remainder, basis points summing to 10000), the transaction search and the dashboard rollups. Both apps import it by relative path; keep it import-free so Vite, Metro and `node --test` all load it.
-- `FrontEnd/web/`: Vite + React 19 + TS, hash routes `#/`, `#/trips`, `#/trip/{plan|schedule|spending|dashboard|shop}`. `vite.config.ts` allows `..` so dev can serve `shared/`.
-- `FrontEnd/mobile/`: Expo SDK 58 + React Native 0.88. It uses state-based navigation in `App.tsx`; screens are in `src/Core.tsx` and `src/Money.tsx`. `metro.config.js` adds `../shared` to `watchFolders`. Add packages with `npx expo install`.
+- `FrontEnd/shared/trip.ts`: plain TS with no imports and no deps. It holds the sample data (mobile), the live trip model and types shared with Backend, the integer-cents split math (largest remainder, basis points summing to 10000), timeline validation, settlement, search and rollups. Keep it import-free so Vite, Metro and `node --test` all load it.
+- `FrontEnd/web/`: Vite + React 19 + TS. Hash routes `#/`, `#/trips`, `#/trip/{id}/{plan|schedule|spending|dashboard|shop}`. `vite.config.ts` proxies `/api` to the Backend (`API_PORT`, default 8787) and allows `..` for `shared/`. AG Grid 36 (Enterprise row grouping; set `VITE_AG_GRID_LICENSE` in `web/.env.local` to remove the watermark) and AG Charts 14. The trip polls every 2 s.
+- `FrontEnd/mobile/`: Expo SDK 58 + React Native 0.88, sample data only. Its Wayfinder replies come from the keyword stand-in `wayfinderReply()` in `shared/trip.ts`; switch it to the Backend API next. Add packages with `npx expo install`.
 
 Commands:
 ```
-cd FrontEnd && node --test shared/            # money/search tests (single test: --test-name-pattern "<name>")
+cd Backend && npm install && npm run dev        # API on :8787 (reads Backend/.env)
+cd Backend && npm test | npm run typecheck      # store rules (single test: npm test -- --test-name-pattern "<name>")
+cd FrontEnd && node --test shared/              # money/timeline/search tests
 cd FrontEnd/web && npm run dev | npm run build | npm run lint
 cd FrontEnd/mobile && npx expo start | npx tsc --noEmit
 ```
-
-No API contract exists yet. When Backend lands, replace the `initial*` sample data with fetches and document ports and env vars here.
-
-## Layout
-
-The repo is a monorepo split into three top-level areas, each currently holding only an empty placeholder markdown file:
-
-- `FrontEnd/`: client app (placeholder: `frontemd.md`)
-- `Backend/`: server/API (placeholder: `backend.md`)
-- `AI/`: AI/ML component (placeholder: `ai.md`)
-
-The root `.gitignore` is the standard Node.js template, which suggests a JS/TS stack, but nothing has been chosen yet.
 
 ## Keeping this file current
 

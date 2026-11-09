@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { initialBills, initialChat, initialTxs, ME, type Bill, type Tx } from '../../shared/trip';
+import { api, saveMember, savedMember, useTrip, type Ctx } from './api';
+import type { Trip } from '../../shared/trip';
 import { Chat, TripHeader } from './ui';
 import { Login, Trips } from './Entry';
 import { Plan } from './Plan';
@@ -8,7 +9,7 @@ import { Spending } from './Spending';
 import { Dashboard } from './Dashboard';
 import { Shop } from './Shop';
 
-// shortcut: hash routing and in-memory state, swap for a router + Backend API when there is one.
+// Routes: #/ landing · #/trips · #/trip/{id}/{plan|schedule|spending|dashboard|shop}
 const useHash = () => {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
@@ -21,30 +22,43 @@ const useHash = () => {
 
 export default function App() {
   const route = useHash();
-  const [txs, setTxs] = useState<Tx[]>(initialTxs);
-  const [bills, setBills] = useState<Bill[]>(initialBills);
-  const [chat, setChat] = useState(initialChat);
-  const [vote, setVote] = useState<string | null>(null);
-
   if (route === 'trips') return <Trips />;
-  const tab = route.match(/^trip\/(\w+)/)?.[1];
-  if (!tab) return <Login />;
+  const m = route.match(/^trip\/([\w-]+)\/?(\w+)?/);
+  if (!m) return <Login />;
+  return <Workspace key={m[1]} id={m[1]} tab={m[2] ?? 'plan'} />;
+}
 
-  const setBill = (b: Bill) => setBills((all) => all.map((x) => (x.id === b.id ? b : x)));
-  const send = (text: string) =>
-    setChat((c) => [...c, { from: ME, time: new Date().toTimeString().slice(0, 5), text }]);
+function Workspace({ id, tab }: { id: string; tab: string }) {
+  const { trip, setTrip, error, setError } = useTrip(id);
+  const [me, setMeState] = useState(() => savedMember(id));
+  if (!trip) return <p className="wrap" style={{ padding: 48 }} role={error ? 'alert' : undefined}>{error ?? 'Loading trip…'}</p>;
+
+  const ctx: Ctx = {
+    trip, me: Math.min(me, trip.members.length - 1),
+    setMe: (n) => { saveMember(id, n); setMeState(n); },
+    act: async (path, body) => {
+      try {
+        const t = await api<Trip>(`/trips/${id}${path}`, { body: body ?? {}, member: me });
+        if (t?.id) setTrip(t);
+        setError(null);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+  };
 
   return (
     <div style={{ minHeight: '100vh' }}>
-      <TripHeader active={tab} />
+      <TripHeader ctx={ctx} active={tab} />
+      {error && <p role="alert" className="wrap small" style={{ marginTop: 12, padding: '10px 14px', background: 'var(--orange-tint)', color: 'var(--orange-ink)', borderRadius: 10 }}>{error}</p>}
       <div className="workspace">
-        <aside><Chat messages={chat} onSend={send} /></aside>
+        <aside><Chat ctx={ctx} /></aside>
         <main>
-          {tab === 'plan' && <Plan bills={bills} setBill={setBill} vote={vote} setVote={setVote} />}
-          {tab === 'schedule' && <Schedule txs={txs} addTx={(t) => setTxs((all) => [...all, t])} />}
-          {tab === 'spending' && <Spending txs={txs} />}
-          {tab === 'dashboard' && <Dashboard txs={txs} />}
-          {tab === 'shop' && <Shop />}
+          {tab === 'plan' && <Plan ctx={ctx} />}
+          {tab === 'schedule' && <Schedule ctx={ctx} />}
+          {tab === 'spending' && <Spending ctx={ctx} />}
+          {tab === 'dashboard' && <Dashboard ctx={ctx} />}
+          {tab === 'shop' && <Shop ctx={ctx} />}
         </main>
       </div>
     </div>

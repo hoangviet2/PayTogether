@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BackHandler, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { initialBills, initialChat, initialTxs, ME, type Bill, type Tx } from '../shared/trip';
+import { initialBills, initialChat, initialTxs, ME, wayfinderReply, type Bill, type ChatMsg, type Tx } from '../shared/trip';
 import { c, TabBar, type Tab } from './src/ui';
 import { Chat, Login, Plan, Shop, Split, Trips } from './src/Core';
 import { Insights, Schedule, Spending } from './src/Money';
@@ -40,7 +40,11 @@ export default function App() {
           {screen === 'trips' && <Trips onOpen={() => setScreen('chat')} />}
           {screen === 'chat' && (
             <Chat messages={chat} vote={vote} setVote={setVote} goSplit={() => setScreen('split')}
-              onSend={(text) => setChat((m) => [...m, { from: ME, time: new Date().toTimeString().slice(0, 5), text }])} />
+              onSend={(text) => {
+                const time = new Date().toTimeString().slice(0, 5);
+                const reply = wayfinderReply(text, txs, vote);
+                setChat((m) => [...m, { from: ME, time, text }, ...(reply ? [{ from: 'ai', time, text: reply } as ChatMsg] : [])]);
+              }} />
           )}
           {screen === 'plan' && <Plan bills={bills} goSplit={() => setScreen('split')} goShop={() => setScreen('shop')} />}
           {screen === 'split' && <Split bills={bills} setBill={setBill} onBack={() => setScreen('plan')} />}

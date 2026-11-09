@@ -136,7 +136,7 @@ export function Chat({ messages, onSend, vote, setVote, goSplit }: {
         </View>
       </ScrollView>
       <View style={[s.row, { padding: 10, backgroundColor: '#fff', borderTopWidth: 1, borderColor: c.line2 }]}>
-        <TextInput value={text} onChangeText={setText} onSubmitEditing={send} placeholder="Message" placeholderTextColor={c.muted} accessibilityLabel="Message" style={[s.input, { flex: 1 }]} returnKeyType="send" />
+        <TextInput value={text} onChangeText={setText} onSubmitEditing={send} placeholder="Message, or ask @Wayfinder" placeholderTextColor={c.muted} accessibilityLabel="Message" style={[s.input, { flex: 1 }]} returnKeyType="send" />
         <Pressable accessibilityRole="button" accessibilityLabel="Send message" onPress={send} style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: c.ink, alignItems: 'center', justifyContent: 'center' }}>
           <Icon d={icons.send} size={18} color="#fff" />
         </Pressable>

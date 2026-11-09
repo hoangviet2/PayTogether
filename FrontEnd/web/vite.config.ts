@@ -1,7 +1,20 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 
-export default defineConfig({
-  plugins: [react()],
-  server: { fs: { allow: ['..'] } }, // serve ../shared (plain TS shared with the mobile app)
+export default defineConfig(({ mode }) => {
+  // API_URL / API_TOKEN come from web/.env.local and stay in the dev server; they never reach the browser bundle.
+  const env = loadEnv(mode, process.cwd(), '')
+  return {
+    plugins: [react()],
+    server: {
+      fs: { allow: ['..'] }, // serve ../shared (plain TS shared with the mobile app and Backend)
+      proxy: {
+        '/api': {
+          target: env.API_URL || 'http://localhost:8787', // local Backend, or the Render URL
+          changeOrigin: true,
+          headers: env.API_TOKEN ? { 'x-access-token': env.API_TOKEN } : {},
+        },
+      },
+    },
+  }
 })

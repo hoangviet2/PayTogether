@@ -1,4 +1,6 @@
-import { members, eur, pct, billAmounts, initialBills, summarize, initialTxs } from '../../shared/trip';
+import { useEffect, useState, type FormEvent } from 'react';
+import { members, eur, pct, billAmounts, initialBills, PHASE_LABEL, type Person, type Trip } from '../../shared/trip';
+import { api, saveMember } from './api';
 import { Chip, Icon, icons, Logo } from './ui';
 
 const stay = initialBills[1];
@@ -55,7 +57,7 @@ export function Login() {
             <div className="col" style={{ gap: 10 }}>
               {members.map((m, i) => (
                 <div key={i} className="row">
-                  <Chip i={i} />
+                  <Chip p={members[i]} />
                   <span style={{ flex: 1, fontSize: 15 }}>{m.name}</span>
                   <span className="mono muted" style={{ fontSize: 14 }}>{pct(stay.bps[i])}</span>
                   <span className="mono" style={{ fontSize: 15, width: 84, textAlign: 'right' }}>{eur(cents[i])}</span>
@@ -76,87 +78,67 @@ export function Login() {
   );
 }
 
+type TripRow = { id: string; name: string; phase: Trip['phase']; members: Person[]; destinations: string[]; window: Trip['window'] };
+
 export function Trips() {
-  const s = summarize(initialTxs);
-  const myDue = billAmounts(stay)[3];
+  const [list, setList] = useState<TripRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { api<TripRow[]>('/trips').then(setList).catch((e) => setError(e.message)); }, []);
+
+  const create = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const names = [String(f.get('me')), ...String(f.get('friends')).split(',')].map((s) => s.trim()).filter(Boolean);
+    try {
+      const t = await api<Trip>('/trips', { body: { name: String(f.get('name')).trim(), currency: f.get('currency'), members: names } });
+      saveMember(t.id, 0);
+      location.hash = `#/trip/${t.id}/plan`;
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh' }}>
       <header style={{ borderBottom: '1px solid var(--line)', background: '#fff' }}>
         <div className="wrap between" style={{ padding: '16px 24px', alignItems: 'center' }}>
           <a href="#/" style={{ textDecoration: 'none', color: 'var(--ink)' }}>{brand}</a>
-          <button type="button" className="btn" style={{ borderRadius: 999, padding: '6px 14px 6px 6px', fontSize: 15, fontWeight: 400 }}>
-            <Chip i={3} />Priya
-          </button>
         </div>
       </header>
       <main className="wrap" style={{ padding: '40px 24px 64px', display: 'flex', flexDirection: 'column', gap: 32 }}>
-        <div className="between" style={{ alignItems: 'flex-end', gap: 24 }}>
-          <div className="col" style={{ gap: 6 }}>
-            <h1 style={{ fontSize: 40, letterSpacing: '-0.02em' }}>Your trips</h1>
-            <p className="muted" style={{ fontSize: 16 }}>3 trips · 1 needs your payment</p>
-          </div>
-          <div className="row" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="field">
-              <label htmlFor="join">Join with an invite link</label>
-              <div className="row" style={{ gap: 8 }}>
-                <input id="join" placeholder="paytogether.app/join/…" style={{ width: 240 }} />
-                <button type="button" className="btn btn-outline" style={{ fontSize: 15 }}>Join</button>
-              </div>
-            </div>
-            <button type="button" className="btn btn-primary" style={{ fontSize: 15, padding: '0 20px' }}><Icon d={icons.plus} />New trip</button>
-          </div>
+        <div className="col" style={{ gap: 6 }}>
+          <h1 style={{ fontSize: 40, letterSpacing: '-0.02em' }}>{list?.length ? 'Your trips' : 'Plan your first trip'}</h1>
+          <p className="muted" style={{ fontSize: 16 }}>Name it, add who’s coming, then tell Wayfinder where you want to go.</p>
         </div>
+        {error && <p role="alert" className="small" style={{ background: 'var(--orange-tint)', color: 'var(--orange-ink)', padding: '10px 14px', borderRadius: 10 }}>{error}</p>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 20 }}>
-          <a href="#/trip/plan" className="card" style={{ textDecoration: 'none', color: 'var(--ink)', gap: 18 }}>
-            <div className="between">
-              <div className="col">
-                <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>Iberia in May</span>
-                <span className="muted" style={{ fontSize: 14 }}>May 14–23 · Lisbon → Seville → Barcelona</span>
+          <form onSubmit={create} className="card" style={{ gap: 14 }} aria-labelledby="new-h">
+            <h2 id="new-h" style={{ fontSize: 22 }}>New trip</h2>
+            <label className="field">Trip name<input name="name" required maxLength={60} placeholder="Summer with the crew" /></label>
+            <label className="field">Your name<input name="me" required maxLength={60} /></label>
+            <label className="field">Who else is coming (comma separated)<input name="friends" placeholder="Maya, Alex, Sam" /></label>
+            <label className="field">Currency
+              <select name="currency" defaultValue="USD">{['USD', 'EUR', 'GBP'].map((c) => <option key={c}>{c}</option>)}</select>
+            </label>
+            <button type="submit" className="btn btn-primary" style={{ fontSize: 15 }}><Icon d={icons.plus} />Create trip and open chat</button>
+          </form>
+          {list?.map((t) => (
+            <a key={t.id} href={`#/trip/${t.id}/plan`} className="card" style={{ textDecoration: 'none', color: 'var(--ink)', gap: 18 }}>
+              <div className="between">
+                <div className="col">
+                  <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>{t.name}</span>
+                  <span className="muted" style={{ fontSize: 14 }}>
+                    {t.window ? `${t.window.start} → ${t.window.end}` : 'Dates not set'}{t.destinations.length ? ` · ${t.destinations.join(' → ')}` : ''}
+                  </span>
+                </div>
+                <span className="pill pill-blue">{PHASE_LABEL[t.phase]}</span>
               </div>
-              <span className="pill pill-orange">Booking</span>
-            </div>
-            <div className="row" style={{ gap: 6 }}>
-              {members.map((_, i) => <Chip key={i} i={i} size={30} />)}
-              <span className="muted" style={{ fontSize: 14, marginLeft: 6 }}>4 members</span>
-            </div>
-            <div className="col" style={{ gap: 8 }}>
-              <div className="bar"><span style={{ width: `${(s.prepaidCollected / s.prepaidTotal) * 100}%`, background: 'var(--brand)' }} /></div>
-              <div className="between muted" style={{ fontSize: 14 }}>
-                <span>Prepaid collected</span>
-                <span className="mono" style={{ color: 'var(--ink)' }}>{eur(s.prepaidCollected)} / {eur(s.prepaidTotal)}</span>
+              <div className="row" style={{ gap: 6 }}>
+                {t.members.map((m) => <Chip key={m.name} p={m} size={30} />)}
+                <span className="muted" style={{ fontSize: 14, marginLeft: 6 }}>{t.members.length} members</span>
               </div>
-            </div>
-            <div className="row" style={{ gap: 10, background: 'var(--orange-tint)', borderRadius: 12, padding: '12px 14px', fontSize: 14, color: '#6B3304' }}>
-              <Icon d={icons.clock} />
-              <span style={{ flex: 1 }}>Your Seville share is due</span>
-              <span className="mono" style={{ fontWeight: 500 }}>{eur(myDue)}</span>
-            </div>
-          </a>
-          <div className="card" style={{ gap: 18 }}>
-            <div className="between">
-              <div className="col">
-                <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>Kyoto, autumn</span>
-                <span className="muted" style={{ fontSize: 14 }}>Dates not set · 3 destinations proposed</span>
-              </div>
-              <span className="pill pill-blue">Planning</span>
-            </div>
-            <div className="row" style={{ gap: 6 }}>
-              <Chip i={3} size={30} />
-              <span className="chip" style={{ width: 30, height: 30, background: '#475569', fontSize: 12 }}>■</span>
-              <span className="muted" style={{ fontSize: 14, marginLeft: 6 }}>2 members · 1 invite pending</span>
-            </div>
-            <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>Wayfinder is waiting on a destinations vote: Kyoto, Kanazawa, Osaka.</p>
-          </div>
-          <div className="card" style={{ background: 'var(--bg)', gap: 18 }}>
-            <div className="between">
-              <div className="col">
-                <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>Big Sur weekend</span>
-                <span className="muted" style={{ fontSize: 14 }}>Mar 6–8 · 5 members</span>
-              </div>
-              <span className="pill pill-gray">Completed</span>
-            </div>
-            <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>Every share was charged. Spending stays searchable.</p>
-          </div>
+            </a>
+          ))}
         </div>
       </main>
     </div>

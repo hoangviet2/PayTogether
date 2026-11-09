@@ -1,0 +1,22 @@
+{
+  "name": "paytogether-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --watch src/server.ts",
+    "start": "node --env-file-if-exists=.env src/server.ts",
+    "test": "DATA_FILE=:memory: node --test src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "@channel3/sdk": "^4.8.0",
+    "@elastic/elasticsearch": "^9.5.1",
+    "@onkernel/sdk": "^0.143.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

@@ -52,3 +52,37 @@ test('May 2027 starts on Saturday', () => {
   assert.deepEqual(g[6], { day: 1, inMonth: true });
   assert.deepEqual(g[0], { day: 25, inMonth: false });
 });
+
+test('wayfinderReply: silent unless mentioned, refuses money moves, amounts come from data', async () => {
+  const { wayfinderReply, eur } = await import('./trip.ts');
+  assert.equal(wayfinderReply('lol nice', initialTxs, null), null);
+  assert.match(wayfinderReply('@Wayfinder pay Maya for me', initialTxs, null)!, /can't move money/);
+  assert.match(wayfinderReply('@Wayfinder change Sam split to 10%', initialTxs, null)!, /Only you can change your own bar/);
+  assert.ok(wayfinderReply('@Wayfinder how much has everyone spent?', initialTxs, null)!.includes(eur(summarize(initialTxs).total)));
+  assert.match(wayfinderReply('@wayfinder poll status?', initialTxs, null)!, /3 of 4 have voted/);
+  assert.match(wayfinderReply('@wayfinder poll status?', initialTxs, 'c')!, /4 of 4 have voted/);
+});
+
+test('live model: timeline validation, redate, split amounts, settlement', async () => {
+  const m = await import('./trip.ts');
+  const leg = (name: string, arrive: string, nights: number) => ({ id: name, destination: { name, country: 'X' }, nights, arrive_date: arrive, depart_date: m.addDays(arrive, nights) });
+  const legs = [leg('Lisbon', '2027-05-14', 3), leg('Porto', '2027-05-17', 2)];
+  assert.deepEqual(m.validateTimeline(legs, { start: '2027-05-14', end: '2027-05-19' }), []);
+  assert.equal(m.validateTimeline(legs, { start: '2027-05-14', end: '2027-05-20' }).length, 1);
+  const moved = m.redate([{ ...legs[0], nights: 4 }, legs[1]]);
+  assert.equal(moved[1].arrive_date, '2027-05-18');
+  assert.deepEqual(m.validateTimeline(moved, null), []);
+  assert.equal(m.addDays('2027-12-31', 1), '2028-01-01');
+
+  const p = { id: 'p', option_id: 'o', kind: 'stay' as const, title: 't', meta: '', total_cents: 100001, currency: 'USD', prepaid: true, frozen: false, is_estimate: true as const,
+    shares: m.equalBps(3).map((ratio_bp: number, member: number) => ({ member, ratio_bp, accepted: false, status: 'none' as const })) };
+  assert.equal(sum(m.shareAmounts(p)!), 100001);
+  assert.equal(m.shareAmounts({ ...p, shares: p.shares.map((s, i) => (i ? s : { ...s, ratio_bp: 5000 })) }), null); // off 100% → no amounts
+
+  const bal = [3000, -1000, -2000, 0];
+  const tx = m.settle(bal);
+  assert.equal(tx.length, 2);
+  const after = bal.slice();
+  tx.forEach((t: { from: number; to: number; amount: number }) => { after[t.from] += t.amount; after[t.to] -= t.amount; });
+  assert.deepEqual(after, [0, 0, 0, 0]);
+});

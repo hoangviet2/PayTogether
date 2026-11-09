@@ -1,47 +1,57 @@
-import { useState } from 'react';
-import { members, eur, pct, searchTxs, summarize, type Tx } from '../../shared/trip';
-import { Chip, Icon, icons } from './ui';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import { themeQuartz, type AutoGroupColumnDef, type ColDef } from 'ag-grid-community';
+import { money, pct, summarizeTrip, type Txn } from '../../shared/trip';
+import { api, type Ctx } from './api';
+import { Icon, icons } from './ui';
 
-const GROUPS = [['none', 'None'], ['member', 'Member'], ['vendor', 'Vendor'], ['leg', 'Leg']] as const;
-const keyOf = (g: string, t: Tx) => (g === 'member' ? members[t.member].name : g === 'vendor' ? t.vendor : t.leg);
+type Row = Txn & { memberName: string; paidByName: string };
+const GROUPS = [['none', 'None'], ['memberName', 'Member'], ['vendor', 'Vendor'], ['leg', 'Leg']] as const;
+const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
 
-function exportCsv(rows: Tx[]) {
-  const head = 'member,day,time,vendor,type,leg,amount_eur,item_total_eur,share,source,status';
-  const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
-  const body = rows.map((t) => [members[t.member].name, `2027-05-${t.day}`, t.time, q(t.vendor), t.type, q(t.leg), (t.amount / 100).toFixed(2), (t.total / 100).toFixed(2), pct(t.shareBp), t.source, t.status].join(','));
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([[head, ...body].join('\n')], { type: 'text/csv' }));
-  a.download = 'iberia-in-may-spending.csv';
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-export function Spending({ txs }: { txs: Tx[] }) {
+export function Spending({ ctx }: { ctx: Ctx }) {
+  const { trip } = ctx;
+  const grid = useRef<AgGridReact<Row>>(null);
   const [q, setQ] = useState('');
-  const [group, setGroup] = useState<string>('none');
-  const hits = searchTxs(txs, q);
-  const s = summarize(txs);
-  const keys = group === 'none' ? [] : [...new Set(hits.map((t) => keyOf(group, t)))];
+  const [hit, setHit] = useState<{ ids: Set<string>; engine: string } | null>(null);
+  const [group, setGroup] = useState<(typeof GROUPS)[number][0]>('none');
 
-  const row = (t: Tx, k: number) => (
-    <tr key={k}>
-      <td className="sticky"><span className="row" style={{ gap: 8 }}><Chip i={t.member} size={24} />{members[t.member].name}</span></td>
-      <td className="muted">May {t.day}, {t.time}</td>
-      <td>{t.vendor}</td>
-      <td className="muted">{t.type}</td>
-      <td className="muted">{t.leg}</td>
-      <td className="num" style={{ fontWeight: 500 }}>{eur(t.amount)}</td>
-      <td className="num muted">{eur(t.total)}</td>
-      <td style={{ minWidth: 120 }}>
-        <span className="row" style={{ gap: 8 }}>
-          <span className="bar" style={{ flex: 1, height: 6 }}><span style={{ width: `${t.shareBp / 100}%`, background: members[t.member].color }} /></span>
-          <span className="mono muted" style={{ fontSize: 12, minWidth: 48, textAlign: 'right' }}>{pct(t.shareBp)}</span>
-        </span>
-      </td>
-      <td className="muted">{t.source}</td>
-      <td><span className={`status st-${t.status}`}>{t.status}</span></td>
-    </tr>
+  // Search runs on the server (Elasticsearch when configured), always scoped to this trip.
+  useEffect(() => {
+    if (!q.trim()) return;
+    const timer = setTimeout(() => {
+      api<{ ids: string[]; engine: string }>(`/trips/${trip.id}/search?q=${encodeURIComponent(q)}`, { member: ctx.me })
+        .then((r) => setHit({ ids: new Set(r.ids), engine: r.engine }))
+        .catch(() => setHit(null));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [q, trip.id, trip.txs.length, ctx.me]);
+
+  const active = q.trim() ? hit : null;
+  const rows = useMemo<Row[]>(
+    () => trip.txs.filter((t) => !active || active.ids.has(t.id)).map((t) => ({ ...t, memberName: trip.members[t.member].name, paidByName: trip.members[t.paid_by].name })),
+    [trip.txs, trip.members, active],
   );
+  const columnDefs = useMemo<ColDef<Row>[]>(() => {
+    const cur = (p: { value: number | null }) => (p.value == null ? '' : money(p.value, trip.currency));
+    return [
+    { field: 'memberName', headerName: 'Member', pinned: 'left', rowGroup: group === 'memberName', hide: group === 'memberName' },
+    { field: 'date', headerName: 'Date', sort: 'asc', width: 120 },
+    { field: 'time', width: 90 },
+    { field: 'vendor', rowGroup: group === 'vendor', hide: group === 'vendor' },
+    { field: 'type', width: 120 },
+    { field: 'leg', headerName: 'Leg', rowGroup: group === 'leg', hide: group === 'leg' },
+    { field: 'amount', headerName: 'Amount', type: 'rightAligned', aggFunc: 'sum', valueFormatter: cur, filter: 'agNumberColumnFilter', width: 130 },
+    { field: 'total', headerName: 'Item total', type: 'rightAligned', valueFormatter: cur, width: 130 },
+    { field: 'shareBp', headerName: 'Share', valueFormatter: (p) => (p.value == null ? '' : pct(p.value)), width: 100 },
+    { field: 'paidByName', headerName: 'Paid by', width: 120 },
+    { field: 'source', width: 140 },
+    { field: 'status', width: 110, cellClass: (p) => (p.value ? `status st-${p.value}` : '') },
+  ];
+  }, [group, trip.currency]);
+  const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true }), []);
+  const autoGroupColumnDef = useMemo<AutoGroupColumnDef<Row>>(() => ({ minWidth: 200 }), []);
+  const s = summarizeTrip(trip);
 
   return (
     <section className="card">
@@ -50,14 +60,14 @@ export function Spending({ txs }: { txs: Tx[] }) {
           <h2 style={{ fontSize: 20 }}>Spending</h2>
           <span className="small muted">Everyone in the trip sees every transaction. PayPal emails and private notes are never indexed.</span>
         </div>
-        <button type="button" className="btn" onClick={() => exportCsv(hits)}>Export CSV</button>
+        <button type="button" className="btn" onClick={() => grid.current?.api.exportDataAsCsv({ fileName: `${trip.name}-spending.csv` })}>Export CSV</button>
       </div>
       <div className="col" style={{ gap: 8 }}>
         <label htmlFor="q" className="small" style={{ fontWeight: 600, color: 'var(--body)' }}>Search transactions</label>
         <div className="row" style={{ gap: 10, border: '2px solid var(--brand)', borderRadius: 12, padding: '0 12px', minHeight: 48 }}>
           <Icon d={icons.search} />
           <input id="q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Try: hotel > 100" style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', fontSize: 15, background: 'transparent' }} />
-          <span className="mono muted" style={{ fontSize: 12 }}>{hits.length} hits</span>
+          <span className="mono muted" style={{ fontSize: 12 }}>{rows.length} hits{active ? ` · ${active.engine}` : ''}</span>
         </div>
       </div>
       <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -66,37 +76,23 @@ export function Spending({ txs }: { txs: Tx[] }) {
           {GROUPS.map(([id, label]) => <button key={id} type="button" aria-pressed={group === id} onClick={() => setGroup(id)}>{label}</button>)}
         </div>
       </div>
-      <div className="table-box">
-        <table style={{ minWidth: 1000 }}>
-          <thead>
-            <tr>
-              {['Member', 'Date / time', 'Vendor', 'Type', 'Location', 'Amount', 'Item total', 'Share', 'Source', 'Status'].map((h, k) => (
-                <th key={h} scope="col" className={k === 0 ? 'sticky' : k === 5 || k === 6 ? 'num' : undefined}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {group === 'none'
-              ? hits.map(row)
-              : keys.flatMap((key) => {
-                  const items = hits.filter((t) => keyOf(group, t) === key);
-                  return [
-                    <tr key={`g-${key}`} className="group-row">
-                      <td colSpan={5} className="sticky" style={{ background: 'var(--gray-tint)' }}>{key}</td>
-                      <td className="num">{eur(items.reduce((a, t) => a + t.amount, 0))}</td>
-                      <td colSpan={4} className="small muted" style={{ fontWeight: 400 }}>{items.length} rows · sum</td>
-                    </tr>,
-                    ...items.map((t, k) => row(t, k + 1000 * keys.indexOf(key))),
-                  ];
-                })}
-            {hits.length === 0 && <tr><td colSpan={10} className="muted">No transactions match “{q}”.</td></tr>}
-          </tbody>
-        </table>
+      <div style={{ height: 480 }}>
+        <AgGridReact<Row>
+          ref={grid}
+          theme={theme}
+          rowData={rows}
+          columnDefs={columnDefs}
+          defaultColDef={defaultColDef}
+          autoGroupColumnDef={autoGroupColumnDef}
+          groupDefaultExpanded={1}
+          getRowId={(p) => p.data.id}
+          overlayNoRowsTemplate={q ? `No transactions match “${q.replace(/[<>&]/g, '')}”.` : 'No transactions yet. Paid shares and logged expenses show up here.'}
+        />
       </div>
       <div className="between small" style={{ color: 'var(--body)', background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 14px' }}>
-        <span>{s.count} transactions · 4 members</span>
+        <span>{s.count} transactions · {trip.members.length} members</span>
         <span>
-          Captured <strong className="mono">{eur(s.captured)}</strong> · Logged <strong className="mono">{eur(s.logged)}</strong> · Pending <strong className="mono">{eur(s.pending)}</strong> · Total <strong className="mono">{eur(s.total)}</strong>
+          Captured <strong className="mono">{money(s.captured, trip.currency)}</strong> · Logged <strong className="mono">{money(s.logged, trip.currency)}</strong> · Pending <strong className="mono">{money(s.pending, trip.currency)}</strong> · Total <strong className="mono">{money(s.total, trip.currency)}</strong>
         </span>
       </div>
     </section>

@@ -1,0 +1,45 @@
+# Render Blueprint for the PayTogether API (Backend/).
+# No rootDir: the server imports FrontEnd/shared/trip.ts, and Render hides files outside a rootDir.
+services:
+  - type: web
+    name: paytogether-api
+    runtime: node
+    # Paid instance + disk: trips and PayPal order ids live in data.json. The free plan wipes the
+    # filesystem on every restart/spin-down, which would orphan in-flight payments.
+    plan: 0.5c-512mb
+    buildCommand: cd Backend && npm ci
+    startCommand: cd Backend && npm start
+    healthCheckPath: /api/config
+    buildFilter:
+      paths:
+        - Backend/**
+        - FrontEnd/shared/**
+    disk:
+      name: paytogether-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATA_FILE
+        value: /var/data/data.json
+      - key: ACCESS_TOKEN
+        generateValue: true
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: KERNEL_API_KEY
+        sync: false
+      - key: ELASTIC_URL
+        sync: false
+      - key: ELASTIC_API_KEY
+        sync: false

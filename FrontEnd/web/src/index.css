@@ -26,6 +26,7 @@ a { color: var(--brand); }
 a:hover { color: var(--ink); }
 button { font: inherit; cursor: pointer; }
 button:disabled { cursor: default; }
+.btn:disabled { opacity: 0.5; }
 input, select { font: inherit; color: var(--ink); }
 :focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
 h1, h2, h3 { margin: 0; font-family: var(--display); }
@@ -133,3 +134,10 @@ dialog::backdrop { background: rgba(1, 33, 105, 0.35); }
   .hero-h1 { font-size: 44px !important; }
   .steps { grid-template-columns: 1fr !important; }
 }
+
+/* phase stepper (ai.md §2) */
+.phases { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; overflow-x: auto; }
+.phases li { flex: 1 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; background: var(--gray-tint); color: var(--muted); white-space: nowrap; }
+.phases li.done { background: var(--blue-tint); color: var(--brand); }
+.phases li.now { background: var(--ink); color: #fff; }
+.st-failed { background: #f9dede; color: #8b1a1a; }

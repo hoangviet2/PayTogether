@@ -135,7 +135,7 @@ export function Spending({ txs }: { txs: Tx[] }) {
   const [q, setQ] = useState('');
   const sum = summarize(txs);
   const hits = searchTxs(txs, q);
-  const tone = { captured: c.blueTint, approved: c.blueTint, created: c.orangeTint, logged: c.grayTint };
+  const tone = { captured: c.blueTint, approved: c.blueTint, created: c.orangeTint, logged: c.grayTint, failed: c.orangeTint };
   return (
     <>
       <ScreenTitle title="Spending" right={<Text style={[s.mono, { fontSize: 18 }]}>{eur(sum.total)}</Text>} />
