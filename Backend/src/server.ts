@@ -1,6 +1,8 @@
 // PayTogether API on node:http. The web app reaches it through Vite's /api proxy (FrontEnd/web/vite.config.ts).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { extname, normalize } from 'node:path';
 import { z } from 'zod';
 import { searchTxns, shareAmounts, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
 import * as store from './store.ts';
@@ -68,9 +70,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   };
   const is = (method: string, n: number) => req.method === method && parts.length === n;
 
-  // Health check and PayPal's webhook (verified by signature) stay open; everything else needs the token when one is set.
-  const open = a === 'config' || (a === 'paypal' && b === 'webhook');
-  if (ACCESS_TOKEN && !open && !safeEqual(String(req.headers['x-access-token'] ?? ''), ACCESS_TOKEN)) throw new HttpError(401, 'Missing or wrong access token.');
+  // Health check, login and PayPal's webhook (verified by signature) stay open. Everything else needs the access token
+  // (dev proxy) or a Log in with PayPal session (the hosted web app, which cannot hold a secret).
+  const open = a === 'config' || (a === 'paypal' && b === 'webhook') || (a === 'auth' && b === 'paypal');
+  const allowed = open || !ACCESS_TOKEN || safeEqual(String(req.headers['x-access-token'] ?? ''), ACCESS_TOKEN) || !!ext.readSession(String(req.headers['x-session'] ?? ''));
+  if (!allowed) throw new HttpError(401, 'Log in with PayPal first.');
 
   if (a === 'config' && is('GET', 2))
     return send({ paypalClientId: ext.ready.paypal ? process.env.PAYPAL_CLIENT_ID : null, paypalLogin: ext.loginUrl(), ready: ext.ready });
@@ -215,7 +219,24 @@ async function sendOrders(t: Trip, previewId: string) {
   store.say(t, 'ai', 'Each of you has a payment request for your share — tap Pay my share.');
 }
 
+// The built web app (FrontEnd/web/dist), so one Render URL serves both the page and /api.
+const WEB = new URL('../../FrontEnd/web/dist/', import.meta.url).pathname;
+const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
+async function web(req: IncomingMessage, res: ServerResponse) {
+  const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
+  const file = path === '/' || !extname(path) ? 'index.html' : path.slice(1); // hash routes always load index.html
+  try {
+    const data = await readFile(WEB + file);
+    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': file.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache' });
+    res.end(data);
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found (build the web app: cd FrontEnd/web && npm run build)');
+  }
+}
+
 createServer((req, res) => {
+  if (!req.url?.startsWith('/api')) return void web(req, res);
   route(req, res).catch((err) => {
     const status = err instanceof HttpError ? err.status : err instanceof store.Rejected ? 409 : err instanceof ext.NotConfigured ? 503 : err instanceof SyntaxError ? 400 : 500;
     if (status === 500) console.error(err);

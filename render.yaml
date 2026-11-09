@@ -7,13 +7,15 @@ services:
     # Paid instance + disk: trips and PayPal order ids live in data.json. The free plan wipes the
     # filesystem on every restart/spin-down, which would orphan in-flight payments.
     plan: 0.5c-512mb
-    buildCommand: cd Backend && npm ci
+    # Also builds the web app; the server serves FrontEnd/web/dist next to /api (one URL for PayPal's Return URL).
+    buildCommand: cd Backend && npm ci && cd ../FrontEnd/web && npm ci --include=dev && npm run build
     startCommand: cd Backend && npm start
     healthCheckPath: /api/config
     buildFilter:
       paths:
         - Backend/**
         - FrontEnd/shared/**
+        - FrontEnd/web/**
     disk:
       name: paytogether-data
       mountPath: /var/data
