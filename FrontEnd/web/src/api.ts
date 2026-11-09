@@ -26,8 +26,9 @@ export function setSession(s: Session | null) {
   try { if (s) localStorage.setItem('pt-session', JSON.stringify(s)); else localStorage.removeItem('pt-session'); } catch { /* private mode: login lasts for this page only */ }
 }
 
-// PayPal sends the browser back to this exact URL; it must match the Return URL in the PayPal app settings.
-const returnUrl = () => location.origin + '/';
+// PayPal sends the browser back to this exact URL; it must match the Return URL in the PayPal app settings
+// character for character: no trailing slash, e.g. https://paytogether-api.onrender.com or http://localhost:5173.
+const returnUrl = () => location.origin;
 
 /** Sends the browser to PayPal's sign-in page. `state` guards against a forged return (CSRF). */
 export function startLogin(loginUrl: string) {

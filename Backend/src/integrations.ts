@@ -48,10 +48,15 @@ async function pp(path: string, body: unknown, requestId?: string) {
   return d;
 }
 
-// ---------- Log in with PayPal (OAuth 2.0 authorization code + userinfo) ----------
-/** The sign-in page; the browser adds redirect_uri and state. Needs "Log in with PayPal" on in the PayPal app settings. */
+// ---------- Log in with PayPal (developer.paypal.com/log-in/build, /log-in/build-button) ----------
+// Scopes must match the attributes ticked under Log in with PayPal → Advanced Settings: Full name → profile, Email → email.
+const LOGIN_SCOPES = 'openid profile email';
+/** Authorization endpoint per the Build button template; the browser adds redirect_uri (= the dashboard Return URL) and state.
+ * fullPage=true: run the flow in this tab, since we redirect rather than open PayPal's mini browser. */
 export const loginUrl = () => ready.paypal
-  ? `${env.PAYPAL_ENV === 'live' ? 'https://www.paypal.com' : 'https://www.sandbox.paypal.com'}/connect/?flowEntry=static&response_type=code&scope=${encodeURIComponent('openid profile email')}&client_id=${encodeURIComponent(env.PAYPAL_CLIENT_ID!)}`
+  ? `${env.PAYPAL_ENV === 'live' ? 'https://www.paypal.com' : 'https://www.sandbox.paypal.com'}/connect?` + new URLSearchParams({
+      flowEntry: 'static', client_id: env.PAYPAL_CLIENT_ID!, response_type: 'code', scope: LOGIN_SCOPES, fullPage: 'true',
+    }).toString().replace(/\+/g, '%20')
   : null;
 
 /** Trades the code PayPal sent back for who the user is. */
@@ -66,10 +71,10 @@ export async function paypalUser(code: string): Promise<{ user: string; name: st
   const { access_token } = (await r.json()) as { access_token: string };
   const u = await fetch(`${PP}/v1/identity/oauth2/userinfo?schema=paypalv1.1`, { headers: { Authorization: `Bearer ${access_token}` } });
   if (!u.ok) throw new Error(`PayPal profile lookup failed (${u.status}).`);
-  const d = (await u.json()) as { user_id?: string; payer_id?: string; name?: string; given_name?: string; family_name?: string; emails?: { value: string }[] };
+  const d = (await u.json()) as { user_id?: string; payer_id?: string; name?: string; given_name?: string; family_name?: string; email?: string; emails?: { value: string }[] };
   const user = d.payer_id ?? d.user_id;
   if (!user) throw new Error('PayPal did not return a user id.');
-  const name = (d.name ?? [d.given_name, d.family_name].filter(Boolean).join(' ')) || d.emails?.[0]?.value || 'PayPal user';
+  const name = (d.name ?? [d.given_name, d.family_name].filter(Boolean).join(' ')) || d.email || d.emails?.[0]?.value || 'PayPal user';
   return { user, name: name.slice(0, 60) };
 }
 

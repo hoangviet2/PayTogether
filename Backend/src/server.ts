@@ -223,9 +223,10 @@ async function sendOrders(t: Trip, previewId: string) {
 const WEB = new URL('../../FrontEnd/web/dist/', import.meta.url).pathname;
 const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
 async function web(req: IncomingMessage, res: ServerResponse) {
-  const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
-  const file = path === '/' || !extname(path) ? 'index.html' : path.slice(1); // hash routes always load index.html
   try {
+    // Inside try: decodeURIComponent throws on a bad escape (/%E0), which would otherwise crash the server.
+    const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
+    const file = path === '/' || !extname(path) ? 'index.html' : path.slice(1); // hash routes always load index.html
     const data = await readFile(WEB + file);
     res.writeHead(200, { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': file.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache' });
     res.end(data);
