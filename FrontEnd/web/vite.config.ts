@@ -7,6 +7,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
+      port: 5173,
+      strictPort: true, // Log in with PayPal returns to this exact address (the Return URL), so never drift to 5174+
       fs: { allow: ['..'] }, // serve ../shared (plain TS shared with the mobile app and Backend)
       proxy: {
         '/api': {
