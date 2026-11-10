@@ -284,7 +284,7 @@ async function sendOrders(t: Trip, previewId: string) {
   const ids = await workflows.offload(ext.ready.paypal, 'paypal-orders', [orders], () => Promise.all(orders.map(ext.createOrder)));
   const rows = store.ordersCreated(t, p, p.shares.map((_, i) => ids[payers.indexOf(i)] ?? ''));
   reindex(t, rows);
-  store.say(t, 'ai', `Everyone accepted ${p.title}. Your share is in Bills and payments on the Plan tab; pay it from there whenever you're ready.`);
+  store.say(t, 'ai', `Everyone accepted ${p.title}. Your share is in Bills and payments on the Spending tab; pay it from there whenever you're ready.`);
 }
 
 createServer((req, res) => {

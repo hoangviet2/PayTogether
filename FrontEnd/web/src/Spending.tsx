@@ -4,6 +4,7 @@ import { themeQuartz, type AutoGroupColumnDef, type ColDef } from 'ag-grid-commu
 import { money, pct, summarizeTrip, type Txn } from '../../shared/trip';
 import { api, type Ctx } from './api';
 import { Icon, icons } from './ui';
+import { Bills, SplitBills } from './Bills';
 
 type Row = Txn & { memberName: string; paidByName: string };
 const GROUPS = [['none', 'None'], ['memberName', 'Member'], ['vendor', 'Vendor'], ['leg', 'Leg']] as const;
@@ -54,6 +55,9 @@ export function Spending({ ctx }: { ctx: Ctx }) {
   const s = summarizeTrip(trip);
 
   return (
+    <>
+    <SplitBills ctx={ctx} />
+    <Bills ctx={ctx} />
     <section className="card">
       <div className="between" style={{ alignItems: 'center' }}>
         <div className="col" style={{ gap: 2 }}>
@@ -96,5 +100,6 @@ export function Spending({ ctx }: { ctx: Ctx }) {
         </span>
       </div>
     </section>
+    </>
   );
 }

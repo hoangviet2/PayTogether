@@ -71,7 +71,7 @@ export const Chip = ({ p, size = 32, ring }: { p: Person; size?: number; ring?: 
 export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
   const { trip, me } = ctx;
   const [copied, setCopied] = useState(false);
-  const tabs = ['plan', 'schedule', 'spending', 'dashboard', 'shop'];
+  const tabs = ['plan', 'spending', 'schedule', 'dashboard', 'shop'];
   return (
     <header style={{ background: '#fff', borderBottom: '1px solid var(--line)' }}>
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '14px 24px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -110,22 +110,27 @@ export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
   );
 }
 
+// The Plan tab shows the planning steps only; Pricing onward happens in Spending.
+const PLAN = PHASES.slice(0, PHASES.indexOf('PRICING'));
+
 /** ai.md §2 state machine: where the group is, and the Confirm that moves it on (all members must confirm). */
 export function PhaseBar({ ctx }: { ctx: Ctx }) {
   const { trip, me, act } = ctx;
   const at = PHASES.indexOf(trip.phase);
   const blocker = confirmBlocker(trip);
-  const label = trip.phase === 'PRICING' && blocker ? null : CONFIRM_LABEL[trip.phase]; // prepaid trips book via payments, not a button
+  const planned = at >= PLAN.length; // after Places the plan is done; money lives in the Spending tab
+  const label = planned ? null : CONFIRM_LABEL[trip.phase];
   const mine = trip.confirms.includes(me);
   return (
     <section className="card" aria-label="Planning progress" style={{ gap: 14 }}>
       <ol className="phases">
-        {PHASES.map((p, k) => (
+        {PLAN.map((p, k) => (
           <li key={p} aria-current={k === at ? 'step' : undefined} className={k < at ? 'done' : k === at ? 'now' : ''}>
             <span className="mono">{k < at ? '✓' : `0${k + 1}`}</span>{PHASE_LABEL[p]}
           </li>
         ))}
       </ol>
+      {planned && <p className="small muted">The plan is done. Split and pay the bills in the <a href={`#/trip/${trip.id}/spending`}>Spending</a> tab.</p>}
       {label && (
         <div className="between" style={{ alignItems: 'center' }}>
           <span className="small muted">

@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { PHASES, money, pollTally, tripDays, validateTimeline, type Poll } from '../../shared/trip';
+import { PHASES, money, pollTally, validateTimeline, type Poll } from '../../shared/trip';
 import type { Ctx } from './api';
-import { Chip, Icon, icons, PhaseBar, PreviewCard } from './ui';
-import { Bills } from './Bills';
-import { Calendar } from './Schedule';
+import { Chip, Icon, icons, PhaseBar } from './ui';
 
 const TONES = ['tone-blue', 'tone-orange', 'tone-gray'];
 
@@ -13,7 +11,6 @@ export function Plan({ ctx }: { ctx: Ctx }) {
   const errs = trip.legs.length ? validateTimeline(trip.legs, trip.window) : [];
   const bump = (id: string, nights: number) => act('/legs', { nights: { [id]: nights } });
   const editable = trip.phase === 'TIMELINE' || trip.phase === 'PLACES';
-  const open = trip.previews.filter((p) => !p.frozen); // still being split; once everyone accepts they live in Bills and payments
   // + takes a night from another stop, so it needs one that has more than 1 (a one-stop trip just gets longer).
   const canGrow = (k: number) => trip.legs.length === 1 || trip.legs.some((l, i) => i !== k && l.nights > 1);
 
@@ -71,33 +68,6 @@ export function Plan({ ctx }: { ctx: Ctx }) {
         <p className="card muted">Wayfinder is searching stays for each leg. Polls show up here.</p>
       )}
 
-      {(at >= 3 || open.length > 0) && (
-        <section aria-labelledby="split-h" className="col" style={{ gap: 14 }}>
-          <div className="col" style={{ gap: 2 }}>
-            <h2 id="split-h" style={{ fontSize: 20 }}>{trip.solo ? 'Your bills' : 'Split bills'}</h2>
-            <span className="small muted">{trip.solo
-              ? 'Every bill is 100% yours. Accept one to get its PayPal payment request.'
-              : 'Move your own bar. Shares must add up to exactly 100%; when everyone accepts, each person gets a PayPal request for their share.'}</span>
-          </div>
-          {trip.previews.length === 0 && <p className="card muted">Wayfinder is pricing the winning places…</p>}
-          {trip.previews.length > 0 && !open.length && <p className="card muted">Everyone has accepted every bill. Pay your shares in Bills and payments below.</p>}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>
-            {open.map((p) => <PreviewCard key={p.id} ctx={ctx} p={p} />)}
-          </div>
-        </section>
-      )}
-
-      <Bills ctx={ctx} />
-
-      {trip.window && (
-        <section aria-labelledby="cal-h" className="card">
-          <div className="col" style={{ gap: 2 }}>
-            <h2 id="cal-h" style={{ fontSize: 20 }}>Calendar</h2>
-            <span className="small muted">Booked stays and payments on their dates. Dashed means not paid yet.</span>
-          </div>
-          <Calendar trip={trip} days={tripDays(trip)} />
-        </section>
-      )}
     </>
   );
 }

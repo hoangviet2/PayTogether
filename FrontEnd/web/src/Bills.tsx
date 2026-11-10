@@ -3,7 +3,7 @@ import { AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
 import { money, pct, shareAmounts, type Preview, type Share } from '../../shared/trip';
 import type { Ctx } from './api';
-import { Icon, icons, PayShare } from './ui';
+import { Icon, icons, PayShare, PreviewCard } from './ui';
 
 type Row = { id: string; previewId: string; bill: string; kind: string; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
 type GridCtx = { pay: (r: Row) => void };
@@ -12,6 +12,27 @@ const KIND = { stay: 'Stay', dining: 'Dining', store: 'In-store' } as const;
 const PAID: Record<Share['status'], string> = { none: '—', created: 'Ready to pay', approved: 'Approved · capturing', captured: 'Paid', failed: 'Payment failed' };
 const payable = (r: Row) => r.isMe && !!r.orderId && (r.status === PAID.created || r.status === PAID.failed);
 
+/** Spending tab, top: bills still being split. Once everyone on a bill accepts, it moves to Bills and payments. */
+export function SplitBills({ ctx }: { ctx: Ctx }) {
+  const { trip } = ctx;
+  const open = trip.previews.filter((p) => !p.frozen);
+  if (!trip.previews.length) return null;
+  return (
+    <section aria-labelledby="split-h" className="col" style={{ gap: 14 }}>
+      <div className="col" style={{ gap: 2 }}>
+        <h2 id="split-h" style={{ fontSize: 20 }}>{trip.solo ? 'Your bills' : 'Split bills'}</h2>
+        <span className="small muted">{trip.solo
+          ? 'Every bill is 100% yours. Accept one to move it to Bills and payments.'
+          : 'Move your own bar; the others adjust so shares always add up to 100%. When everyone accepts, the bill moves to Bills and payments.'}</span>
+      </div>
+      {!open.length && <p className="card muted">Everyone has accepted every bill. Pay your shares in Bills and payments below.</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>
+        {open.map((p) => <PreviewCard key={p.id} ctx={ctx} p={p} />)}
+      </div>
+    </section>
+  );
+}
+
 const status = (p: Preview, s: Share) => (p.frozen ? PAID[s.status] : 'Accepted · waiting for the others');
 
 function PayCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCtx>) {
@@ -19,7 +40,7 @@ function PayCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCt
   return <button type="button" className="btn btn-primary" style={{ minHeight: 36 }} onClick={() => context.pay(data)}>Pay</button>;
 }
 
-/** Plan tab: every share someone has accepted, with its payment status. Paying happens here, when each person is ready. */
+/** Spending tab: every share someone has accepted, with its payment status. Paying happens here, when each person is ready. */
 export function Bills({ ctx }: { ctx: Ctx }) {
   const { trip, me } = ctx;
   const [paying, setPaying] = useState<Row | null>(null);
