@@ -1,7 +1,8 @@
 # Render Blueprint: three services, deployed separately.
 #   paytogether-api        Backend/ (API only, /api/*)
 #   paytogether-web        FrontEnd/web as a static site; it calls the API cross-origin (VITE_API_URL ↔ WEB_ORIGIN).
-#   paytogether-workflows  Render Workflows (Backend/src/tasks.ts): Wayfinder turns, PayPal orders, Elastic indexing.
+#   paytogether-workflows  Render Workflows (Backend/src/tasks.ts): every AI/agent job (Wayfinder, its reply check,
+#                          Channel3 search, Kernel checkout) plus PayPal orders and Elastic indexing.
 # No rootDir on either: both import FrontEnd/shared/trip.ts, and Render hides files outside a rootDir.
 services:
   - type: web
@@ -91,6 +92,10 @@ services:
         fromService: { type: web, name: paytogether-api, envVarKey: PAYPAL_CLIENT_ID }
       - key: PAYPAL_CLIENT_SECRET
         fromService: { type: web, name: paytogether-api, envVarKey: PAYPAL_CLIENT_SECRET }
+      - key: CHANNEL3_API_KEY
+        fromService: { type: web, name: paytogether-api, envVarKey: CHANNEL3_API_KEY }
+      - key: KERNEL_API_KEY
+        fromService: { type: web, name: paytogether-api, envVarKey: KERNEL_API_KEY }
       - key: ELASTIC_URL
         fromService: { type: web, name: paytogether-api, envVarKey: ELASTIC_URL }
       - key: ELASTIC_API_KEY

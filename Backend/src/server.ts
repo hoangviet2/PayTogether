@@ -181,7 +181,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     }
     if (c === 'legs' && is('POST', 4)) {
       const { nights } = await body(req, z.object({ nights: z.record(z.string(), z.number().int().min(1).max(60)) }));
-      wayfinder(t, store.editNights(t, nights));
+      store.editNights(t, nights); // no Wayfinder turn: these edits are valid by construction, and each click would queue one
       persist();
       return send(t);
     }
@@ -233,13 +233,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 
   if (a === 'products' && is('GET', 2)) {
     const max = Number(url.searchParams.get('max')) || undefined;
-    return send(await ext.searchProducts(url.searchParams.get('q') ?? '', max, url.searchParams.get('currency') ?? 'USD'));
+    const q = url.searchParams.get('q') ?? '', currency = url.searchParams.get('currency') ?? 'USD';
+    return send(await workflows.offload(ext.ready.channel3, 'search-products', [q, max ?? null, currency], () => ext.searchProducts(q, max, currency)));
   }
   if (a === 'checkout' && is('POST', 2)) {
     const { url: target } = await body(req, z.object({ url: z.string().url().refine((u) => u.startsWith('https://'), 'https only') }));
-    return send(await ext.openCheckout(target));
+    return send(await workflows.offload(ext.ready.kernel, 'open-checkout', [target], () => ext.openCheckout(target)));
   }
-  if (a === 'checkout' && b && is('DELETE', 3)) return send((await ext.closeCheckout(b), { ok: true }));
+  if (a === 'checkout' && b && is('DELETE', 3))
+    return send((await workflows.offload(ext.ready.kernel, 'close-checkout', [b], () => ext.closeCheckout(b).then(() => true)), { ok: true }));
 
   if (a === 'paypal' && b === 'webhook' && is('POST', 3)) {
     const event = await body(req, z.object({ id: z.string(), event_type: z.string(), resource: z.record(z.string(), z.any()) }).passthrough());
@@ -269,7 +271,7 @@ async function sendOrders(t: Trip, previewId: string) {
     requestId: `${p.id}-${s.ratio_bp}-${i}`, customId: `${t.id}:${p.id}:${i}`, cents: cents[i], currency: p.currency,
     description: `${t.name} · ${p.title} · ${t.members[i].name}'s share`,
   }));
-  const ids = workflows.enabled ? await workflows.run<string[]>('paypal-orders', [orders]) : await Promise.all(orders.map(ext.createOrder));
+  const ids = await workflows.offload(ext.ready.paypal, 'paypal-orders', [orders], () => Promise.all(orders.map(ext.createOrder)));
   const rows = store.ordersCreated(t, p, ids);
   reindex(t, rows);
   store.say(t, 'ai', 'Each of you has a payment request for your share — tap Pay my share.');

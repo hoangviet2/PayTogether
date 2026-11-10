@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as s from './store.ts';
-import { toolsFor } from './wayfinder.ts';
+import { runTurn, toolsFor } from './wayfinder.ts';
 
 test('tool args are validated before running', async () => {
   const t = s.createTrip('Test', 'USD', ['Ana', 'Ben']);
@@ -15,4 +15,13 @@ test('tool args are validated before running', async () => {
   assert.equal(t.destinations.length, 0);
   assert.match(await run('propose_destinations', '{"destinations":["Lisbon"],"start_date":"2027-05-14","end_date":"2027-05-17"}'), /Saved/);
   assert.deepEqual(t.destinations, ['Lisbon']);
+});
+
+test('a burst of triggers while a turn is queued becomes one turn, not a backlog', async () => {
+  delete process.env.OPENAI_API_KEY; // the turn fails fast and says so: one message per turn, no network
+  const t = s.createTrip('Burst', 'USD', ['Ana', 'Ben']);
+  const before = t.chat.length;
+  await Promise.all([1, 2, 3, 4, 5].map((n) => runTurn(t, `edit ${n}`, () => {})));
+  assert.equal(t.chat.length - before, 1);
+  assert.equal(t.busy, false);
 });

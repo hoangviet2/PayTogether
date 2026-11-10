@@ -17,3 +17,8 @@ export async function run<T>(task: string, args: unknown[]): Promise<T> {
 
 /** Starts a task without waiting (fire and forget). */
 export const start = (task: string, args: unknown[]) => api().startTask(`${SLUG}/${task}`, args);
+
+/** Runs a job on the workflow service when workflows are on and the feature's keys are set; otherwise in-process,
+ * which is also what reports a missing key (HTTP 503) instead of a failed run. */
+export const offload = <T>(ready: boolean, task: string, args: unknown[], local: () => Promise<T>): Promise<T> =>
+  enabled && ready ? run<T>(task, args) : local();
