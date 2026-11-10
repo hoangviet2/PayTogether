@@ -107,3 +107,17 @@ test('mySummary: only my rows, pending vs spent, todos for unaccepted and unpaid
   assert.deepEqual(s.todos.map((x: { cta: string; cents: number | null }) => [x.cta, x.cents]), [['Open split', 1000], ['Pay my share', 1000]]);
   assert.equal(m.mySummary(t, 2).spent, 0); // a seat with nothing is all zero
 });
+
+test('nights: +1 in one stop comes from the stop with the most nights; total stays fixed', async () => {
+  const m = await import('./trip.ts');
+  // HCM 3, Hanoi 5, Da Nang 2: HCM +1 takes from Hanoi
+  assert.deepEqual(m.rebalanceNights([3, 5, 2], 0, 4), [4, 4, 2]);
+  assert.deepEqual(m.rebalanceNights([3, 5, 2], 0, 5), [5, 3, 2]);
+  assert.deepEqual(m.rebalanceNights([4, 4, 2], 2, 3), [4, 3, 3]); // tie: the later stop gives
+  assert.deepEqual(m.rebalanceNights([3, 5, 2], 1, 4), [3, 4, 3]); // -1 goes to the stop with the fewest
+  assert.equal(m.rebalanceNights([1, 1, 8], 2, 9), null); // others already at 1
+  assert.equal(m.rebalanceNights([3, 5, 2], 0, 0), null);
+  assert.deepEqual(m.fitNights([3, 5, 2], 12), [4, 5, 3]); // longer trip: fewest first
+  assert.deepEqual(m.fitNights([3, 5, 2], 8), [3, 3, 2]);
+  assert.equal(m.fitNights([3, 5, 2], 2), null);
+});

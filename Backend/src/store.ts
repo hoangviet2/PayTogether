@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomInt, randomUUID } from 'node:crypto';
 import {
-  PALETTE, PHASES, confirmBlocker, equalBps, pollTally, redate, shareAmounts, validateTimeline,
+  PALETTE, PHASES, confirmBlocker, daysBetween, equalBps, fitNights, pollTally, rebalanceNights, redate, shareAmounts, validateTimeline,
   type Leg, type PlaceOption, type Poll, type Preview, type Trip, type Txn,
 } from '../../FrontEnd/shared/trip.ts';
 
@@ -176,12 +176,73 @@ function openPoll(t: Trip, pollId: string) {
 }
 
 /** Members drag nights in the UI; dates re-flow from the first arrival. */
-export function editNights(t: Trip, nights: Record<string, number>): string {
-  if (t.phase !== 'TIMELINE') reject('The timeline is confirmed.');
-  t.legs = redate(t.legs.map((l) => ({ ...l, nights: nights[l.id] ?? l.nights })));
+// ---------- plan edits (chat or Plan tab). Open until Pricing; any edit resets confirmations. ----------
+const editable = (t: Trip) => {
+  if (PHASES.indexOf(t.phase) >= PHASES.indexOf('PRICING')) reject('Prices are already being split, so the plan is locked.');
   t.confirms = [];
-  const errs = validateTimeline(t.legs, t.window);
-  return `timeline_edited: ${t.legs.map((l) => `${l.destination.name} ${l.nights}n`).join(', ')}. ${errs.length ? 'Problems: ' + errs.join(' ') : 'Dates check out.'}`;
+};
+const describe = (t: Trip) => t.legs.map((l) => `${l.destination.name} ${l.nights}n (${l.arrive_date} → ${l.depart_date})`).join(', ');
+
+/** One stop's nights; the trip length stays the same (rebalanceNights). A one-stop trip moves its end date instead. */
+export function setNights(t: Trip, legId: string, nights: number): string {
+  editable(t);
+  const k = t.legs.findIndex((l) => l.id === legId);
+  if (k < 0) reject('No such stop in the timeline yet.');
+  if (nights < 1) reject('Each stop needs at least 1 night.');
+  const before = t.legs.map((l) => l.nights);
+  const n = t.legs.length === 1 ? [nights] : rebalanceNights(before, k, nights);
+  if (!n) reject('The other stops are already down to 1 night. Change the trip dates to add more.');
+  t.legs = redate(t.legs.map((l, i) => ({ ...l, nights: n![i] })));
+  if (t.legs.length === 1 && t.window) t.window = { start: t.window.start, end: t.legs[0].depart_date };
+  const moved = t.legs.flatMap((l, i) => (i !== k && l.nights !== before[i] ? [`${l.destination.name} ${before[i]}→${l.nights}`] : []));
+  return `timeline_edited: ${describe(t)}.${moved.length ? ` To keep the trip length, adjusted ${moved.join(', ')}.` : ''}`;
+}
+
+/** Plan tab − / +: same rule, one stop at a time. */
+export function editNights(t: Trip, nights: Record<string, number>): string {
+  let event = '';
+  for (const [legId, n] of Object.entries(nights)) event = setNights(t, legId, n);
+  return event;
+}
+
+/** Replaces the list of stops, in order. Kept stops keep their id (and polls); new ones get 2 nights, then everything
+ * is fitted to the trip window. Polls for dropped stops go away. */
+export function setStops(t: Trip, stops: { name: string; country: string; nights?: number }[]): string {
+  editable(t);
+  if (!stops.length) reject('A trip needs at least one stop.');
+  t.destinations = stops.map((s) => s.name);
+  if (t.phase === 'DESTINATIONS' || !t.window) return `Stops are now ${t.destinations.join(' → ')}.`;
+  const old = new Map(t.legs.map((l) => [l.destination.name.toLowerCase(), l]));
+  const total = daysBetween(t.window.start, t.window.end);
+  const n = fitNights(stops.map((s) => s.nights ?? old.get(s.name.toLowerCase())?.nights ?? 2), total);
+  if (!n) reject(`${total} nights can't give ${stops.length} stops at least 1 night each. Make the trip longer first.`);
+  t.legs = redate(stops.map((s, i) => {
+    const prev = old.get(s.name.toLowerCase());
+    return { id: prev?.id ?? id(), destination: { name: s.name, country: s.country }, nights: n![i], arrive_date: t.window!.start, depart_date: '', ...(prev?.transport_hint && { transport_hint: prev.transport_hint }) };
+  }));
+  const kept = new Set(t.legs.map((l) => l.id));
+  t.polls = t.polls.filter((p) => !p.leg_id || kept.has(p.leg_id));
+  return `timeline_edited: ${describe(t)}.`;
+}
+
+/** Name, dates and budget. New dates refit the stops' nights to the new length (fitNights) and re-date them. */
+export function updateTrip(t: Trip, p: { name?: string; start_date?: string; end_date?: string; budget_per_person_cents?: number | null }): string {
+  editable(t);
+  if (p.name) t.name = p.name;
+  if (p.budget_per_person_cents !== undefined) t.budget_per_person_cents = p.budget_per_person_cents ?? undefined;
+  if (p.start_date || p.end_date) {
+    const start = p.start_date ?? t.window?.start;
+    const end = p.end_date ?? t.window?.end;
+    if (!start || !end) reject('Give both a start and an end date.');
+    if (!(end! > start!)) reject('The end date must be after the start date.');
+    if (t.legs.length) {
+      const n = fitNights(t.legs.map((l) => l.nights), daysBetween(start!, end!));
+      if (!n) reject(`That is too short for ${t.legs.length} stops at 1 night each.`);
+      t.legs = redate(t.legs.map((l, i) => ({ ...l, nights: n![i], ...(i === 0 && { arrive_date: start! }) })));
+    }
+    t.window = { start: start!, end: end! };
+  }
+  return `trip_updated: ${t.name}, ${t.window ? `${t.window.start} → ${t.window.end}` : 'no dates'}${t.legs.length ? `; ${describe(t)}` : ''}.`;
 }
 
 /** A member sets only their own ratio (invariant 7). Any change resets every acceptance. */

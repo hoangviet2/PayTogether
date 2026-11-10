@@ -28,6 +28,14 @@ export const icons = {
   check: 'M5 12l5 5L20 7',
 };
 
+/** Back to the previous page, or home when there is none (opened from a link or a fresh tab). */
+export const BackLink = ({ label = 'Back' }: { label?: string }) => (
+  <a href="#/home" className="btn" style={{ alignSelf: 'flex-start', border: 'none', background: 'transparent', paddingLeft: 4, fontSize: 15 }}
+    onClick={(e) => { if (history.length > 1) { e.preventDefault(); history.back(); } }}>
+    <Icon d="M15 18l-6-6 6-6" />{label}
+  </a>
+);
+
 /** Member avatar: color plus symbol, never color alone (invariant 10). */
 export const Chip = ({ p, size = 32, ring }: { p: Person; size?: number; ring?: boolean }) => (
   <span className="chip" title={p.name} style={{ width: size, height: size, background: p.color, fontSize: size * 0.42, border: ring ? '2px solid #fff' : undefined }}>
@@ -44,22 +52,23 @@ export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '14px 24px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div className="between" style={{ alignItems: 'center' }}>
           <div className="row" style={{ flexWrap: 'wrap', gap: 14 }}>
-            <a href="#/trips" aria-label="Back to your trips" style={{ display: 'flex', width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}><Logo size={28} /></a>
+            <a href="#/home" className="btn" style={{ border: 'none', paddingLeft: 4, fontSize: 15 }}><Icon d="M15 18l-6-6 6-6" />Back</a>
+            <Logo size={28} />
             <div className="col" style={{ gap: 2 }}>
               <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 22 }}>{trip.name}</span>
               <span className="small muted">
-                {trip.window ? `${trip.window.start} → ${trip.window.end}` : 'Dates not set'} · {trip.members.length} members · {trip.currency}
+                {trip.window ? `${trip.window.start} → ${trip.window.end}` : 'Dates not set'} · {trip.solo ? 'Just you' : `${trip.members.length} members`} · {trip.currency}
               </span>
             </div>
             <span className="pill pill-orange">{PHASE_LABEL[trip.phase]}</span>
           </div>
           <div className="row small" style={{ gap: 14, flexWrap: 'wrap' }}>
             {/* Friends log in with PayPal, then enter this code on the trips page. */}
-            <button type="button" className="btn" style={{ minHeight: 40 }} aria-label={`Join code ${trip.code}, copy`}
+            {!trip.solo && <button type="button" className="btn" style={{ minHeight: 40 }} aria-label={`Join code ${trip.code}, copy`}
               onClick={() => navigator.clipboard?.writeText(trip.code).then(() => setCopied(true), () => {})}>
               <span className="muted">Join code</span><span className="mono" style={{ fontWeight: 600, letterSpacing: '0.12em' }}>{trip.code}</span>
               <span className="muted" aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
-            </button>
+            </button>}
             <span className="row" style={{ gap: 8 }}>
               <Chip p={trip.members[me]} size={28} />
               <span>{trip.members[me].name}{me === 0 ? ' (owner)' : ''}</span>
@@ -188,6 +197,7 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
           <span className={`pill ${p.frozen ? 'pill-orange' : 'pill-blue'}`} style={{ fontSize: 11 }}>{p.frozen ? 'Collecting' : 'Estimate'}</span>
         </div>
       </div>
+      {!trip.solo && <>
       <div role="img" aria-label={p.shares.map((s, i) => `${trip.members[i].name} ${pct(s.ratio_bp)}`).join(', ')} className="bar" style={{ height: 14, gap: 2 }}>
         {p.shares.map((s, i) => <span key={i} style={{ width: `${s.ratio_bp / 100}%`, background: trip.members[i].color }} />)}
       </div>
@@ -214,12 +224,13 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
           </div>
         ))}
       </div>
+      </>}
       <div className="between" style={{ alignItems: 'center', borderTop: '1px solid var(--line-2)', paddingTop: 14 }}>
         <span className="small muted">
-          {p.frozen ? `${p.shares.filter((s) => s.status === 'captured').length} of ${p.shares.length} paid` : `${accepted} of ${p.shares.length} accepted`} · prices are estimates until booking
+          {trip.solo ? (p.frozen ? STATUS[mine.status] || 'Payment request sent' : 'All yours') : p.frozen ? `${p.shares.filter((s) => s.status === 'captured').length} of ${p.shares.length} paid` : `${accepted} of ${p.shares.length} accepted`} · prices are estimates until booking
         </span>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-          {!p.frozen && me === 0 && <button type="button" className="btn" onClick={() => act(`/previews/${p.id}/equal`)}>Reset to equal</button>}
+          {!p.frozen && me === 0 && !trip.solo && <button type="button" className="btn" onClick={() => act(`/previews/${p.id}/equal`)}>Reset to equal</button>}
           {!p.frozen && (
             <button type="button" className={`btn ${mine.accepted ? 'btn-on' : 'btn-primary'}`} disabled={!cents} aria-pressed={mine.accepted}
               onClick={() => act(`/previews/${p.id}/accept`)}>

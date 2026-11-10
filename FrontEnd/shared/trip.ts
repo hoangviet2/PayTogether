@@ -327,6 +327,26 @@ export function redate(legs: Leg[]): Leg[] {
   });
 }
 
+/** Resizes nights to a new total, one night at a time: a night is taken from the stop with the most nights
+ * (ties: the later stop) and given to the stop with the fewest (ties: the earlier stop). Every stop keeps ≥ 1.
+ * null when the total can't give each stop a night. */
+export function fitNights(nights: number[], total: number): number[] | null {
+  if (total < nights.length) return null;
+  const out = nights.slice();
+  let diff = total - out.reduce((a, n) => a + n, 0);
+  for (; diff > 0; diff--) out[out.indexOf(Math.min(...out))]++;
+  for (; diff < 0; diff++) out[out.lastIndexOf(Math.max(...out))]--;
+  return out;
+}
+
+/** Sets stop k to `value` nights and keeps the trip length: the other stops absorb the difference via fitNights,
+ * so +1 in one city takes a night from the city with the most nights. null when the others are already at 1. */
+export function rebalanceNights(nights: number[], k: number, value: number): number[] | null {
+  const total = nights.reduce((a, n) => a + n, 0);
+  const others = fitNights(nights.filter((_, i) => i !== k), total - value);
+  return value < 1 || !others ? null : [...others.slice(0, k), value, ...others.slice(k)];
+}
+
 export const ratioSum = (p: Preview) => p.shares.reduce((a, s) => a + s.ratio_bp, 0);
 /** Cents per share, or null while ratios don't sum to 100% (ai.md §2.4: nobody else's ratio moves). */
 export const shareAmounts = (p: Preview) => (ratioSum(p) === 10000 ? largestRemainder(p.total_cents, p.shares.map((s) => s.ratio_bp)) : null);

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { PHASE_LABEL, money, mySummary, type Person, type Trip } from '../../shared/trip';
 import { api, getSession, setSession, useTrip } from './api';
-import { Chip, Icon, icons, Logo } from './ui';
+import { BackLink, Chip, Icon, icons, Logo } from './ui';
 
 export type TripRow = Pick<Trip, 'id' | 'name' | 'phase' | 'currency' | 'members' | 'destinations' | 'window'> & { solo: boolean; mine: ReturnType<typeof mySummary> };
 
@@ -204,13 +204,7 @@ export function Home() {
                   <span className={`pill ${pillFor(t.phase)}`}>{PHASE_LABEL[t.phase]}</span>
                 </a>
               ))}
-              {isNew && (
-                <>
-                  <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>Start a trip on your own or with friends, or enter the join code someone sent you.</p>
-                  <a href="#/new" className="btn btn-primary" style={{ minHeight: 48, fontSize: 15 }}>Create your first trip</a>
-                  <a href="#/join" className="btn" style={{ minHeight: 48, fontSize: 15 }}>Join with a code</a>
-                </>
-              )}
+              {isNew && <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>No trips yet. Use Create a trip or Join a trip above.</p>}
             </section>
           </aside>
         </div>
@@ -315,7 +309,8 @@ export function NewTrip({ mode }: { mode: 'create' | 'join' }) {
   return (
     <div style={{ minHeight: '100vh' }}>
       <TopBar />
-      <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px 64px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <main style={{ maxWidth: 760, margin: '0 auto', padding: '24px 24px 64px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <BackLink />
         <nav aria-label="Create or join" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 4, background: 'var(--gray-tint)', borderRadius: 14, padding: 4 }}>
           {tab('create', 'Create a trip')}{tab('join', 'Join a trip')}
         </nav>
@@ -385,7 +380,8 @@ export function GroupSetup({ id }: { id: string }) {
   return (
     <div style={{ minHeight: '100vh' }}>
       <TopBar />
-      <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px 64px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <main style={{ maxWidth: 760, margin: '0 auto', padding: '24px 24px 64px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <BackLink />
         <section className="card" aria-labelledby="gs-h" style={{ borderRadius: 20, padding: 28, gap: 22 }}>
           <div className="col" style={{ gap: 6 }}>
             <h1 id="gs-h" style={{ fontSize: 30, letterSpacing: '-0.02em' }}>Add people to {trip.name}</h1>

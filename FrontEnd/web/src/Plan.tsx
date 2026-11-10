@@ -10,6 +10,9 @@ export function Plan({ ctx }: { ctx: Ctx }) {
   const at = PHASES.indexOf(trip.phase);
   const errs = trip.legs.length ? validateTimeline(trip.legs, trip.window) : [];
   const bump = (id: string, nights: number) => act('/legs', { nights: { [id]: nights } });
+  const editable = trip.phase === 'TIMELINE' || trip.phase === 'PLACES';
+  // + takes a night from another stop, so it needs one that has more than 1 (a one-stop trip just gets longer).
+  const canGrow = (k: number) => trip.legs.length === 1 || trip.legs.some((l, i) => i !== k && l.nights > 1);
 
   return (
     <>
@@ -36,7 +39,7 @@ export function Plan({ ctx }: { ctx: Ctx }) {
             <h2 id="tl-h" style={{ fontSize: 20 }}>Timeline</h2>
             <span className="small muted">
               {trip.legs.length ? `${trip.legs.reduce((a, l) => a + l.nights, 0)} nights · ${trip.legs[0].arrive_date} → ${trip.legs.at(-1)!.depart_date}` : 'Wayfinder is drafting the legs…'}
-              {trip.phase === 'TIMELINE' && trip.legs.length > 0 && ' · change nights with − / +'}
+              {editable && trip.legs.length > 0 && ' · change nights with − / + (the other stops adjust to keep the trip length), or ask Wayfinder'}
             </span>
           </div>
           {trip.legs.length > 0 && (
@@ -45,11 +48,11 @@ export function Plan({ ctx }: { ctx: Ctx }) {
                 <li key={l.id} className={TONES[k % 3]} style={{ flex: `${l.nights} 1 0` }}>
                   <div className="between"><strong style={{ fontSize: 16 }}>{l.destination.name}</strong><span className="mono" style={{ fontSize: 12 }}>0{k + 1}</span></div>
                   <span className="small">{l.arrive_date} → {l.depart_date}{l.transport_hint && l.transport_hint !== 'none' && ` · ${l.transport_hint}`}</span>
-                  {trip.phase === 'TIMELINE' ? (
+                  {editable ? (
                     <div className="row" style={{ gap: 4 }}>
                       <button type="button" className="stepper" aria-label={`Fewer nights in ${l.destination.name}`} onClick={() => bump(l.id, l.nights - 1)} disabled={l.nights <= 1}>−</button>
                       <span style={{ minWidth: 64, textAlign: 'center', fontSize: 14, fontWeight: 600 }}>{l.nights} night{l.nights > 1 ? 's' : ''}</span>
-                      <button type="button" className="stepper" aria-label={`More nights in ${l.destination.name}`} onClick={() => bump(l.id, l.nights + 1)}>+</button>
+                      <button type="button" className="stepper" aria-label={`More nights in ${l.destination.name}`} onClick={() => bump(l.id, l.nights + 1)} disabled={!canGrow(k)}>+</button>
                     </div>
                   ) : <span style={{ fontSize: 14, fontWeight: 600 }}>{l.nights} night{l.nights > 1 ? 's' : ''}</span>}
                 </li>
@@ -68,8 +71,10 @@ export function Plan({ ctx }: { ctx: Ctx }) {
       {at >= 3 && (
         <section aria-labelledby="split-h" className="col" style={{ gap: 14 }}>
           <div className="col" style={{ gap: 2 }}>
-            <h2 id="split-h" style={{ fontSize: 20 }}>Split bills</h2>
-            <span className="small muted">Move your own bar. Shares must add up to exactly 100%; when everyone accepts, each person gets a PayPal request for their share.</span>
+            <h2 id="split-h" style={{ fontSize: 20 }}>{trip.solo ? 'Your bills' : 'Split bills'}</h2>
+            <span className="small muted">{trip.solo
+              ? 'Every bill is 100% yours. Accept one to get its PayPal payment request.'
+              : 'Move your own bar. Shares must add up to exactly 100%; when everyone accepts, each person gets a PayPal request for their share.'}</span>
           </div>
           {trip.previews.length === 0 && <p className="card muted">Wayfinder is pricing the winning places…</p>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>

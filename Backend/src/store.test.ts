@@ -111,3 +111,24 @@ test('group trip: confirm waits for a second member; invite by email, accept joi
   const solo = s.createTrip('S', 'USD', ['Ana'], 'pp-ana', { solo: true });
   assert.throws(() => s.invite(solo, 'ben@x.com'), /solo trip/);
 });
+
+test('plan edits: +1 night rebalances, dates refit, stops keep ids, locked from Pricing', () => {
+  const t = s.createTrip('VN', 'USD', ['Ana'], 'pp-ana', { solo: true });
+  s.proposeDestinations(t, ['HCM', 'Hanoi', 'Da Nang'], '2027-05-01', '2027-05-11');
+  s.confirm(t, 0);
+  const leg = (name: string, nights: number, arrive: string, depart: string) => ({ destination: { name, country: 'VN' }, nights, arrive_date: arrive, depart_date: depart });
+  assert.deepEqual(s.draftTimeline(t, [leg('HCM', 3, '2027-05-01', '2027-05-04'), leg('Hanoi', 5, '2027-05-04', '2027-05-09'), leg('Da Nang', 2, '2027-05-09', '2027-05-11')]), []);
+  const nights = () => t.legs.map((l) => l.nights);
+  assert.match(s.setNights(t, t.legs[0].id, 4), /adjusted Hanoi 5→4/);
+  assert.deepEqual(nights(), [4, 4, 2]);
+  assert.equal(t.legs[2].depart_date, '2027-05-11'); // trip length unchanged
+  s.updateTrip(t, { end_date: '2027-05-13' }); // +2 nights go to the stops with the fewest
+  assert.deepEqual(nights(), [4, 4, 4]);
+  const hanoi = t.legs[1].id;
+  s.setStops(t, [{ name: 'Hanoi', country: 'VN' }, { name: 'Hue', country: 'VN' }]);
+  assert.equal(t.legs[0].id, hanoi);
+  assert.equal(t.legs.reduce((a, l) => a + l.nights, 0), 12);
+  assert.equal(t.legs.at(-1)!.depart_date, t.window!.end);
+  t.phase = 'PRICING';
+  assert.throws(() => s.updateTrip(t, { name: 'X' }), /locked/);
+});

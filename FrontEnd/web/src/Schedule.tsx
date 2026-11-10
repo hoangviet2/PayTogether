@@ -205,7 +205,7 @@ function LogExpense({ ref, ctx, day, onDone }: { ref: Ref<HTMLDialogElement>; ct
           <label className="field" style={{ width: 110 }}>Time<input name="time" type="time" defaultValue="20:00" /></label>
         </div>
         <div className="field">Who paid<span className="row" style={{ fontWeight: 400, fontSize: 15, color: 'var(--ink)' }}><Chip p={trip.members[me]} size={24} />{trip.members[me].name} (you)</span></div>
-        <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
+        {!trip.solo && <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
           <legend className="field" style={{ marginBottom: 6 }}>Split with</legend>
           <div role="group" className="seg" style={{ alignSelf: 'flex-start' }}>
             <button type="button" aria-pressed={mode === 'me'} onClick={() => setMode('me')}>Me only</button>
@@ -224,7 +224,7 @@ function LogExpense({ ref, ctx, day, onDone }: { ref: Ref<HTMLDialogElement>; ct
           <span className="small muted">
             {who.length} selected{valid && who.length ? ` · ${money(shares[0], trip.currency)}${new Set(shares).size > 1 ? ' or less' : ''} each` : ''}. You paid; the others owe you their share (see Dashboard → settle up).
           </span>
-        </fieldset>
+        </fieldset>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" onClick={onDone}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={!valid || !who.length}>Save expense</button>
