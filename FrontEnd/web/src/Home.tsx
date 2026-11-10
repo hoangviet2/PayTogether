@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { PHASE_LABEL, money, mySummary, type Person, type Trip } from '../../shared/trip';
+import { money, mySummary, tripStatus, type Person, type Trip } from '../../shared/trip';
 import { api, getSession, setSession, useTrip } from './api';
-import { BackLink, Chip, Icon, icons, Logo } from './ui';
+import { BackLink, Chip, Icon, icons, Logo, StatusPill } from './ui';
 
 export type TripRow = Pick<Trip, 'id' | 'name' | 'phase' | 'currency' | 'members' | 'destinations' | 'window'> & { solo: boolean; mine: ReturnType<typeof mySummary> };
 
@@ -11,7 +11,6 @@ const group = 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4
 const alert = { background: 'var(--orange-tint)', color: 'var(--orange-ink)', padding: '10px 14px', borderRadius: 10 };
 const h2 = { fontSize: 19 };
 const striped = 'repeating-linear-gradient(135deg, #009CDE 0 3px, #BFE6F7 3px 6px)';
-const pillFor = (p: Trip['phase']) => (p === 'SETTLED' ? 'pill-gray' : p === 'PRICING' || p === 'BOOKED' ? 'pill-orange' : 'pill-blue');
 
 /** A group trip still waiting for its second member opens on the invite step, not the workspace. */
 const tripHref = (t: Pick<TripRow, 'id' | 'solo' | 'members'>) => (!t.solo && t.members.length < 2 ? `#/setup/${t.id}` : `#/trip/${t.id}/plan`);
@@ -91,7 +90,7 @@ export function Home() {
     { label: 'Total spent', value: total(list.map((t) => ({ currency: t.currency, cents: t.mine.spent }))), note: 'your share, all trips' },
     { label: 'Pending', value: total(list.map((t) => ({ currency: t.currency, cents: t.mine.pending }))), note: list.some((t) => t.mine.pending) ? 'waiting on PayPal' : 'nothing waiting' },
     { label: 'Upcoming bills', value: String(todos.length), note: todos.length ? todos[0].title : 'to accept' },
-    { label: 'Trips', value: String(list.length), note: isNew ? 'none yet' : `${list.filter((t) => t.phase !== 'SETTLED').length} active` },
+    { label: 'Trips', value: String(list.length), note: isNew ? 'none yet' : `${list.filter((t) => tripStatus(t) !== 'Completed').length} not completed` },
   ];
 
   return (
@@ -201,7 +200,7 @@ export function Home() {
               {list.slice(0, 5).map((t) => (
                 <a key={t.id} href={tripHref(t)} className="between" style={{ alignItems: 'center', minHeight: 52, padding: '8px 0', borderTop: '1px solid var(--line-2)', textDecoration: 'none', color: 'var(--ink)' }}>
                   <span className="col"><strong style={{ fontSize: 15 }}>{t.name}</strong><span style={{ fontSize: 12 }} className="muted">{meta(t)}</span></span>
-                  <span className={`pill ${pillFor(t.phase)}`}>{PHASE_LABEL[t.phase]}</span>
+                  <StatusPill t={t} />
                 </a>
               ))}
               {isNew && <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>No trips yet. Use Create a trip or Join a trip above.</p>}
@@ -219,7 +218,7 @@ function TripBar({ t, max }: { t: TripRow; max: number }) {
   const { spent, pending } = t.mine;
   return (
     <>
-      <span className="col"><strong style={{ fontWeight: 600 }}>{t.name}</strong><span style={{ fontSize: 12 }} className="muted">{PHASE_LABEL[t.phase]}</span></span>
+      <span className="col"><strong style={{ fontWeight: 600 }}>{t.name}</strong><span style={{ fontSize: 12 }} className="muted">{tripStatus(t)}</span></span>
       <div role="img" aria-label={`${t.name}: ${money(spent, t.currency)} spent, ${money(pending, t.currency)} pending`} style={{ display: 'flex', height: 22, background: 'var(--gray-tint)', borderRadius: 6, overflow: 'hidden' }}>
         <span style={{ width: `${(spent / max) * 100}%`, background: 'var(--brand)' }} />
         <span style={{ width: `${(pending / max) * 100}%`, background: striped }} />
@@ -257,7 +256,7 @@ export function Trips() {
                   <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>{t.name}</span>
                   <span className="muted" style={{ fontSize: 14 }}>{meta(t)}{t.destinations.length ? ` · ${t.destinations.join(' → ')}` : ''}</span>
                 </div>
-                <span className={`pill ${pillFor(t.phase)}`}>{PHASE_LABEL[t.phase]}</span>
+                <StatusPill t={t} />
               </div>
               <div className="row" style={{ gap: 6 }}>
                 {t.members.map((m: Person) => <Chip key={m.name} p={m} size={30} />)}

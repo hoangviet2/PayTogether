@@ -257,6 +257,13 @@ export const PHASES: Phase[] = ['DESTINATIONS', 'TIMELINE', 'PLACES', 'PRICING',
 export const PHASE_LABEL: Record<Phase, string> = {
   DESTINATIONS: 'Destinations', TIMELINE: 'Timeline', PLACES: 'Places', PRICING: 'Pricing', BOOKED: 'Booked', ON_TRIP: 'On trip', SETTLED: 'Settled',
 };
+/** The status members see: planning until Places is confirmed, then in progress until the trip ends or settles. */
+export type TripStatus = 'Not planned yet' | 'In progress' | 'Completed';
+export function tripStatus(t: Pick<Trip, 'phase' | 'window'>, today = new Date().toISOString().slice(0, 10)): TripStatus {
+  if (PHASES.indexOf(t.phase) < PHASES.indexOf('PRICING')) return 'Not planned yet';
+  return t.phase === 'SETTLED' || (t.window && today > t.window.end) ? 'Completed' : 'In progress';
+}
+
 export type Person = { name: string; symbol: string; color: string; tint: string; user?: string }; // user: PayPal id once they log in
 /** Color + symbol per member slot, never color alone (invariant 10). */
 export const PALETTE: Omit<Person, 'name' | 'user'>[] = [

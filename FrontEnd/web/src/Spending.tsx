@@ -36,7 +36,9 @@ export function Spending({ ctx }: { ctx: Ctx }) {
   const columnDefs = useMemo<ColDef<Row>[]>(() => {
     const cur = (p: { value: number | null }) => (p.value == null ? '' : money(p.value, trip.currency));
     return [
-    { field: 'memberName', headerName: 'Member', pinned: 'left', rowGroup: group === 'memberName', hide: group === 'memberName' },
+    // Each person's rows in their own color, with their symbol so color isn't the only cue.
+    { field: 'memberName', headerName: 'Member', pinned: 'left', rowGroup: group === 'memberName', hide: group === 'memberName',
+      valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}` : p.value), cellStyle: (p) => (p.data ? { color: trip.members[p.data.member].color, fontWeight: 600 } : null) },
     { field: 'date', headerName: 'Date', sort: 'asc', width: 120 },
     { field: 'time', width: 90 },
     { field: 'vendor', rowGroup: group === 'vendor', hide: group === 'vendor' },
@@ -45,11 +47,11 @@ export function Spending({ ctx }: { ctx: Ctx }) {
     { field: 'amount', headerName: 'Amount', type: 'rightAligned', aggFunc: 'sum', valueFormatter: cur, filter: 'agNumberColumnFilter', width: 130 },
     { field: 'total', headerName: 'Item total', type: 'rightAligned', valueFormatter: cur, width: 130 },
     { field: 'shareBp', headerName: 'Share', valueFormatter: (p) => (p.value == null ? '' : pct(p.value)), width: 100 },
-    { field: 'paidByName', headerName: 'Paid by', width: 120 },
+    { field: 'paidByName', headerName: 'Paid by', width: 120, cellStyle: (p) => (p.data ? { color: trip.members[p.data.paid_by].color } : null) },
     { field: 'source', width: 140 },
     { field: 'status', width: 110, cellClass: (p) => (p.value ? `status st-${p.value}` : '') },
   ];
-  }, [group, trip.currency]);
+  }, [group, trip.currency, trip.members]);
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true }), []);
   const autoGroupColumnDef = useMemo<AutoGroupColumnDef<Row>>(() => ({ minWidth: 200 }), []);
   const s = summarizeTrip(trip);

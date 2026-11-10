@@ -19,6 +19,14 @@ export async function run<T>(task: string, args: unknown[]): Promise<T> {
 export const start = (task: string, args: unknown[]) => api().startTask(`${SLUG}/${task}`, args);
 
 /** Runs a job on the workflow service when workflows are on and the feature's keys are set; otherwise in-process,
- * which is also what reports a missing key (HTTP 503) instead of a failed run. */
-export const offload = <T>(ready: boolean, task: string, args: unknown[], local: () => Promise<T>): Promise<T> =>
-  enabled && ready ? run<T>(task, args) : local();
+ * which is also what reports a missing key (HTTP 503) instead of a failed run. If the workflow run fails (say the
+ * workflow is missing a key the API has), the API runs it itself, so only use this for jobs that are safe to repeat. */
+export async function offload<T>(ready: boolean, task: string, args: unknown[], local: () => Promise<T>): Promise<T> {
+  if (!enabled || !ready) return local();
+  try {
+    return await run<T>(task, args);
+  } catch (e) {
+    console.error(`Workflow ${task} failed, running it in the API instead:`, (e as Error).message);
+    return local();
+  }
+}

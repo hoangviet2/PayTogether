@@ -152,16 +152,21 @@ export function Calendar({ trip, days }: { trip: Trip; days: string[] }) {
           <span className="small muted">{legOn(trip, sel) ?? 'Travel day'} · {items.length} items</span>
         </div>
         {items.length === 0 && <p className="small muted">No transactions on this day.</p>}
-        {items.map((t) => (
-          <div key={t.id} className="row" style={{ alignItems: 'flex-start' }}>
+        {items.map((t) => {
+          const paid = t.source === 'Prepaid share' || t.source === 'In-store'; // payments open in Spending
+          const Tag = paid ? 'a' : 'div';
+          return (
+          <Tag key={t.id} {...(paid && { href: `#/trip/${trip.id}/spending`, title: 'Open in Spending' })} className="row"
+            style={{ alignItems: 'flex-start', textDecoration: 'none', color: 'inherit', borderRadius: 8, padding: paid ? 4 : 0, background: paid ? '#fff' : undefined }}>
             <Chip p={trip.members[t.member]} size={28} />
             <div className="col" style={{ flex: 1, minWidth: 0 }}>
               <strong style={{ fontSize: 14 }}>{t.vendor}{t.source === 'Prepaid share' ? ` — ${trip.members[t.member].name}’s share` : ''}</strong>
               <span className="small muted">{t.time} · {t.source} · {t.status}{t.paid_by !== t.member ? ` · paid by ${trip.members[t.paid_by].name}` : ''}</span>
             </div>
             <span className="mono small">{money(t.amount, trip.currency)}</span>
-          </div>
-        ))}
+          </Tag>
+          );
+        })}
       </aside>
     </div>
   );

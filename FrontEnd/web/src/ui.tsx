@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import {
-  CONFIRM_LABEL, PHASES, PHASE_LABEL, confirmBlocker, money, pct, ratioSum, shareAmounts,
-  type Person, type Preview, type Share,
+  CONFIRM_LABEL, PHASES, PHASE_LABEL, confirmBlocker, money, pct, ratioSum, shareAmounts, tripStatus,
+  type Person, type Preview, type Share, type Trip,
 } from '../../shared/trip';
 import { api, useConfig, type Ctx } from './api';
 
@@ -68,6 +68,19 @@ export const Chip = ({ p, size = 32, ring }: { p: Person; size?: number; ring?: 
   </span>
 );
 
+const STATUS_PILL = { 'Not planned yet': 'pill-blue', 'In progress': 'pill-orange', Completed: 'pill-gray' } as const;
+/** The trip's status for members: Not planned yet, In progress or Completed. */
+export const StatusPill = ({ t }: { t: Pick<Trip, 'phase' | 'window'> }) => <span className={`pill ${STATUS_PILL[tripStatus(t)]}`}>{tripStatus(t)}</span>;
+
+/** Owner only (the server checks too). Gone for everyone, so it asks first. */
+async function remove({ trip }: Ctx) {
+  if (!confirm(`Delete “${trip.name}” for everyone in it? The chat, plan and bills go too. This can’t be undone.`)) return;
+  try {
+    await api(`/trips/${trip.id}`, { method: 'DELETE' });
+    location.hash = '#/home';
+  } catch (e) { alert((e as Error).message); }
+}
+
 export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
   const { trip, me } = ctx;
   const [copied, setCopied] = useState(false);
@@ -85,7 +98,7 @@ export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
                 {trip.window ? `${trip.window.start} → ${trip.window.end}` : 'Dates not set'} · {trip.solo ? 'Just you' : `${trip.members.length} members`} · {trip.currency}
               </span>
             </div>
-            <span className="pill pill-orange">{PHASE_LABEL[trip.phase]}</span>
+            <StatusPill t={trip} />
           </div>
           <div className="row small" style={{ gap: 14, flexWrap: 'wrap' }}>
             {/* Friends log in with PayPal, then enter this code on the trips page. */}
@@ -94,6 +107,7 @@ export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
               <span className="muted">Join code</span><span className="mono" style={{ fontWeight: 600, letterSpacing: '0.12em' }}>{trip.code}</span>
               <span className="muted" aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
             </button>}
+            {me === 0 && <button type="button" className="btn" style={{ minHeight: 40, color: 'var(--orange-ink)' }} onClick={() => remove(ctx)}>Delete trip</button>}
             <span className="row" style={{ gap: 8 }}>
               <Chip p={trip.members[me]} size={28} />
               <span>{trip.members[me].name}{me === 0 ? ' (owner)' : ''}</span>

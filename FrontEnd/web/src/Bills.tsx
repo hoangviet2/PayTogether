@@ -5,7 +5,7 @@ import { money, pct, shareAmounts, type Preview, type Share } from '../../shared
 import type { Ctx } from './api';
 import { Icon, icons, PayShare, PreviewCard } from './ui';
 
-type Row = { id: string; previewId: string; bill: string; kind: string; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
+type Row = { id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
 type GridCtx = { pay: (r: Row) => void };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
 const KIND = { stay: 'Stay', dining: 'Dining', store: 'In-store' } as const;
@@ -49,7 +49,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const rows = useMemo<Row[]>(() => trip.previews.flatMap((p) => {
     const cents = shareAmounts(p);
     return p.shares.flatMap((s, i) => (!s.ratio_bp || (!s.accepted && !p.frozen) ? [] : [{
-      id: `${p.id}-${i}`, previewId: p.id, bill: p.title, kind: KIND[p.kind], memberName: trip.members[i].name, isMe: i === me,
+      id: `${p.id}-${i}`, previewId: p.id, bill: p.title, kind: KIND[p.kind], member: i, memberName: trip.members[i].name, isMe: i === me,
       bp: s.ratio_bp, cents: cents?.[i] ?? null, status: status(p, s), orderId: s.order_id,
     }]));
   }), [trip.previews, trip.members, me]);
@@ -57,12 +57,13 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const columnDefs = useMemo<ColDef<Row>[]>(() => [
     { field: 'bill', headerName: 'Bill', flex: 2, minWidth: 160 },
     { field: 'kind', headerName: 'Type', width: 110 },
-    { field: 'memberName', headerName: 'Who', width: 130, valueFormatter: (p) => (p.data?.isMe ? `${p.value} (you)` : p.value) },
+    { field: 'memberName', headerName: 'Who', width: 150, valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}${p.data.isMe ? ' (you)' : ''}` : p.value),
+      cellStyle: (p) => (p.data ? { color: trip.members[p.data.member].color, fontWeight: 600 } : null) },
     { field: 'bp', headerName: 'Share', width: 100, valueFormatter: (p) => (p.value == null ? '' : pct(p.value)) },
     { field: 'cents', headerName: 'Amount', type: 'rightAligned', width: 120, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, trip.currency)) },
     { field: 'status', headerName: 'Status', flex: 1, minWidth: 170 },
     { headerName: '', colId: 'pay', width: 130, cellRenderer: PayCell, sortable: false, filter: false },
-  ], [trip.currency]);
+  ], [trip.currency, trip.members]);
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true }), []);
   const context = useMemo<GridCtx>(() => ({ pay: setPaying }), []);
   const mine = rows.filter((r) => r.isMe && payable(r));

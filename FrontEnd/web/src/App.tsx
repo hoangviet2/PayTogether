@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, finishLogin, getSession, useTrip, type Ctx } from './api';
-import type { Trip } from '../../shared/trip';
+import { PHASES, type Trip } from '../../shared/trip';
 import { Chat, TripHeader } from './ui';
 import { Login } from './Entry';
 import { GroupSetup, Home, NewTrip, Trips } from './Home';
@@ -38,6 +38,13 @@ export default function App() {
 
 function Workspace({ id, tab }: { id: string; tab: string }) {
   const { trip, setTrip, error, setError } = useTrip(id);
+  // When the group confirms Places the plan is done: take everyone to Spending, once, on that change only.
+  const phase = useRef(trip?.phase);
+  useEffect(() => {
+    const was = phase.current;
+    phase.current = trip?.phase;
+    if (was === 'PLACES' && trip && PHASES.indexOf(trip.phase) > PHASES.indexOf('PLACES')) location.hash = `#/trip/${id}/spending`;
+  }, [trip, id]);
   if (!trip) return <p className="wrap" style={{ padding: 48 }} role={error ? 'alert' : undefined}>{error ?? 'Loading trip…'}</p>;
 
   const ctx: Ctx = {
@@ -58,7 +65,7 @@ function Workspace({ id, tab }: { id: string; tab: string }) {
       <TripHeader ctx={ctx} active={tab} />
       {error && <p role="alert" className="wrap small" style={{ marginTop: 12, padding: '10px 14px', background: 'var(--orange-tint)', color: 'var(--orange-ink)', borderRadius: 10 }}>{error}</p>}
       <div className="workspace">
-        <aside><Chat ctx={ctx} /></aside>
+        {tab === 'plan' && <aside><Chat ctx={ctx} /></aside>}
         <main>
           {tab === 'plan' && <Plan ctx={ctx} />}
           {tab === 'schedule' && <Schedule ctx={ctx} />}

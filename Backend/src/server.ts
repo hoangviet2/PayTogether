@@ -156,6 +156,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const t = tripOr404(b);
     const m = member(req, t);
     if (is('GET', 3)) return send(t);
+    if (is('DELETE', 3)) {
+      store.deleteTrip(t, m);
+      persist();
+      return send({ ok: true });
+    }
 
     if (c === 'invite' && is('POST', 4)) {
       const { email } = await body(req, z.object({ email: z.string().trim().email().max(254) }));

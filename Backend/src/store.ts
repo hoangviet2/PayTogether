@@ -79,6 +79,13 @@ export function invite(t: Trip, email: string) {
 }
 export const invitesFor = (user: string) => [...trips.values()].filter((t) => t.invites?.some((i) => i.user === user));
 
+/** Owner only. Refused once any PayPal payment request exists, so no payment loses its trip. */
+export function deleteTrip(t: Trip, m: number) {
+  if (m !== 0) reject('Only the person who created the trip can delete it.');
+  if (t.previews.some((p) => p.shares.some((s) => s.order_id))) reject('This trip has PayPal payment requests, so it can’t be deleted.');
+  trips.delete(t.id);
+}
+
 export const say = (t: Trip, from: number | 'ai', text: string) => t.chat.push({ from, at: now(), text });
 
 // ---------- confirm / phases (ai.md §2: any member proposes, all members must accept) ----------
@@ -369,3 +376,4 @@ export const publicState = (t: Trip) => ({
   trip_window_nights: t.window ? Math.round((Date.parse(t.window.end) - Date.parse(t.window.start)) / 864e5) : null,
   today: now().slice(0, 10),
 });
+

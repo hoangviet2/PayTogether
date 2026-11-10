@@ -132,3 +132,13 @@ test('split: setting your share spreads the rest over the others in proportion; 
   assert.deepEqual(m.rebalanceShares([10000], 0, 3000), [10000]); // solo is always 100%
   for (const bp of [0, 1, 3333, 9999, 10000]) assert.equal(sum(m.rebalanceShares([2500, 2500, 2500, 2500], 1, bp)), 10000);
 });
+
+test('trip status: three states from phase and dates', async () => {
+  const m = await import('./trip.ts');
+  const w = { start: '2027-05-01', end: '2027-05-07' };
+  assert.equal(m.tripStatus({ phase: 'PLACES', window: w }, '2027-06-01'), 'Not planned yet');
+  assert.equal(m.tripStatus({ phase: 'PRICING', window: w }, '2027-04-01'), 'In progress');
+  assert.equal(m.tripStatus({ phase: 'ON_TRIP', window: w }, '2027-05-07'), 'In progress');
+  assert.equal(m.tripStatus({ phase: 'BOOKED', window: w }, '2027-05-08'), 'Completed');
+  assert.equal(m.tripStatus({ phase: 'SETTLED', window: null }), 'Completed');
+});

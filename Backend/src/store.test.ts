@@ -164,3 +164,14 @@ test('split and store bills: the other covers the rest; 0% members get no row', 
   assert.deepEqual(rows.map((r) => [r.member, r.amount, r.source]), [[0, 2700, 'In-store'], [1, 6300, 'In-store']]);
   assert.equal(p.payee!.email, 'pho@store.com');
 });
+
+test('delete trip: owner only, never once PayPal requests exist', () => {
+  const t = s.createTrip('Del', 'USD', ['Ana', 'Ben']);
+  assert.throws(() => s.deleteTrip(t, 1), /created the trip/);
+  const p = s.createStoreBill(t, 0, { vendor: 'Cafe', email: 'c@x.com', total: 1000, category: 'Restaurant', members: [0, 1] });
+  p.shares[0].order_id = 'O1';
+  assert.throws(() => s.deleteTrip(t, 0), /PayPal payment requests/);
+  p.shares[0].order_id = undefined;
+  s.deleteTrip(t, 0);
+  assert.equal(s.trips.has(t.id), false);
+});
