@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { money, type Trip } from '../../shared/trip';
+import { money, type Share, type Trip } from '../../shared/trip';
 import { api, type Ctx } from './api';
 import { Icon, icons, PayShare } from './ui';
 
@@ -87,6 +87,8 @@ export function Shop({ ctx }: { ctx: Ctx }) {
         </div>
       </section>
 
+      <Orders ctx={ctx} />
+
       {paying && (
         <section className="card" aria-labelledby="pp-h">
           <div className="between" style={{ alignItems: 'center' }}>
@@ -101,5 +103,50 @@ export function Shop({ ctx }: { ctx: Ctx }) {
         </section>
       )}
     </>
+  );
+}
+
+const ORDER_STATUS: Record<Share['status'], [string, string]> = {
+  none: ['Not paid', 'pill-gray'], created: ['Awaiting payment', 'pill-orange'], approved: ['Capturing', 'pill-blue'], captured: ['Paid', 'pill-blue'], failed: ['Payment failed', 'pill-orange'],
+};
+
+/** Order summary of everything the group bought online, laid out like a store's checkout summary. */
+function Orders({ ctx }: { ctx: Ctx }) {
+  const { trip, me } = ctx;
+  const items = trip.previews.filter((p) => p.kind === 'shop').map((p) => {
+    const buyer = p.shares.findIndex((s) => s.ratio_bp === 10000);
+    return { p, buyer, status: p.shares[buyer]?.status ?? 'none', store: p.meta.split(' · ')[1] ?? '' };
+  });
+  if (!items.length) return null;
+  const sum = (f: (s: Share['status']) => boolean) => items.filter((i) => f(i.status)).reduce((a, i) => a + i.p.total_cents, 0);
+  return (
+    <section className="card" aria-labelledby="orders-h" style={{ maxWidth: 560 }}>
+      <div className="between" style={{ alignItems: 'baseline' }}>
+        <h2 id="orders-h" style={{ fontSize: 18 }}>Bought online</h2>
+        <span className="small muted">{items.length} item{items.length === 1 ? '' : 's'}</span>
+      </div>
+      <ul className="col" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 0 }}>
+        {items.map(({ p, buyer, status, store }) => {
+          const m = trip.members[buyer];
+          const [label, pill] = ORDER_STATUS[status];
+          return (
+            <li key={p.id} className="between" style={{ gap: 12, padding: '12px 0', borderBottom: '1px solid var(--line-2)', alignItems: 'flex-start' }}>
+              <div className="col" style={{ gap: 3, minWidth: 0 }}>
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{p.title}</span>
+                <span className="small muted">{store}{m && <> · <span style={{ color: m.color }}>{m.symbol}</span> {m.name}{buyer === me ? ' (you)' : ''}</>}</span>
+                <span className={`pill ${pill}`} style={{ fontSize: 11, alignSelf: 'flex-start' }}>{label}</span>
+              </div>
+              <span className="mono" style={{ fontSize: 14, whiteSpace: 'nowrap' }}>{money(p.total_cents, p.currency)}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <dl className="col" style={{ gap: 6, margin: 0 }}>
+        <div className="between small"><dt className="muted">Paid</dt><dd className="mono" style={{ margin: 0 }}>{money(sum((s) => s === 'captured'), trip.currency)}</dd></div>
+        <div className="between small"><dt className="muted">Not paid yet</dt><dd className="mono" style={{ margin: 0 }}>{money(sum((s) => s !== 'captured'), trip.currency)}</dd></div>
+        <div className="between" style={{ borderTop: '1px solid var(--line)', paddingTop: 8, fontWeight: 600 }}><dt>Total</dt><dd className="mono" style={{ margin: 0 }}>{money(sum(() => true), trip.currency)}</dd></div>
+      </dl>
+      <span className="small muted">Unpaid items can be paid from Bills and payments on the Spending tab.</span>
+    </section>
   );
 }

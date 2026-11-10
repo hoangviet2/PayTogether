@@ -165,6 +165,19 @@ test('split and store bills: the other covers the rest; 0% members get no row', 
   assert.equal(p.payee!.email, 'pho@store.com');
 });
 
+test('taking 100% needs nobody else; store bills take a custom split', () => {
+  const t = s.createTrip('Full', 'USD', ['Ana', 'Ben', 'Cy']);
+  const p = s.createStoreBill(t, 1, { vendor: 'Bar', email: 'b@x.com', total: 9000, category: 'Restaurant', members: [], bps: [2000, 8000, 0] });
+  assert.deepEqual(p.shares.map((x) => x.accepted), [false, false, true]);
+  assert.equal(s.readyToCharge(p), false);
+  s.setRatio(t, p.id, 0, 10000);
+  assert.deepEqual(p.shares.map((x) => [x.ratio_bp, x.accepted]), [[10000, true], [0, true], [0, true]]);
+  assert.equal(s.readyToCharge(p), true);
+  const solo = s.createStoreBill(t, 2, { vendor: 'Kiosk', email: 'k@x.com', total: 500, category: 'Store', members: [], bps: [0, 0, 10000] });
+  assert.equal(s.readyToCharge(solo), true);
+  assert.throws(() => s.createStoreBill(t, 0, { vendor: 'X', email: 'x@x.com', total: 1, category: 'Store', members: [], bps: [5000, 4000, 0] }), /100%/);
+});
+
 test('delete trip: owner only, never once PayPal requests exist', () => {
   const t = s.createTrip('Del', 'USD', ['Ana', 'Ben']);
   assert.throws(() => s.deleteTrip(t, 1), /created the trip/);

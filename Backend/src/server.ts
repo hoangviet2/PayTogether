@@ -220,6 +220,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (e === 'ratio' && is('POST', 6)) {
         const { bp } = await body(req, z.object({ bp: z.number().int().min(0).max(10000) }));
         wayfinder(t, store.setRatio(t, d, m, bp));
+        if (store.readyToCharge(t.previews.find((x) => x.id === d)!)) await sendOrders(t, d); // someone took 100%
       } else if (e === 'equal' && is('POST', 6)) store.resetEqual(t, d, m);
       else if (e === 'accept' && is('POST', 6)) {
         if (store.accept(t, d, m)) await sendOrders(t, d);
@@ -237,8 +238,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const i = await body(req, z.object({
         vendor: name, email: z.string().trim().email().max(254), total: z.number().int().positive().max(100_000_00),
         category: z.enum(['Restaurant', 'Store', 'Transport', 'Tickets', 'Other']), members: z.array(z.number().int().min(0)).max(20),
+        bps: z.array(z.number().int().min(0).max(10000)).max(20).optional(),
       }));
-      store.createStoreBill(t, m, i);
+      const p = store.createStoreBill(t, m, i);
+      if (store.readyToCharge(p)) await sendOrders(t, p.id); // the person adding it took 100%
       persist();
       return send(t);
     }

@@ -300,8 +300,10 @@ export function updateTrip(t: Trip, p: { name?: string; start_date?: string; end
 export function setRatio(t: Trip, previewId: string, m: number, bp: number): string {
   const p = editablePreview(t, previewId);
   const bps = rebalanceShares(p.shares.map((s) => s.ratio_bp), m, bp);
-  // Everyone re-accepts the new amounts, except people not on a store bill (0%), who owe nothing there.
-  p.shares.forEach((s, i) => Object.assign(s, { ratio_bp: bps[i], accepted: !!p.payee && bps[i] === 0 }));
+  // Everyone re-accepts the new amounts, except people at 0% on a store bill, who owe nothing there.
+  // Taking 100% needs nobody else's say: the taker and everyone left at 0% count as accepted.
+  const all = bps[m] === 10000;
+  p.shares.forEach((s, i) => Object.assign(s, { ratio_bp: bps[i], accepted: all || (!!p.payee && bps[i] === 0) }));
   return `split_edited: ${t.members[m].name} set their share of ${p.title} to ${(bps[m] / 100).toFixed(2)}%; the others now have ${p.shares.flatMap((s, i) => (i === m ? [] : [`${t.members[i].name} ${(s.ratio_bp / 100).toFixed(2)}%`])).join(', ')}.`;
 }
 
@@ -317,8 +319,11 @@ export function accept(t: Trip, previewId: string, m: number): boolean {
   const p = editablePreview(t, previewId);
   if (!shareAmounts(p)) reject('Shares must add up to 100% before anyone can accept.');
   p.shares[m].accepted = !p.shares[m].accepted;
-  return (p.prepaid || !!p.payee) && p.shares.every((s) => s.accepted); // store bills also get PayPal requests
+  return readyToCharge(p);
 }
+
+/** Every share accepted on a bill that gets PayPal requests (prepaid stays, store bills). */
+export const readyToCharge = (p: Preview) => !p.frozen && (p.prepaid || !!p.payee) && p.shares.every((s) => s.accepted);
 
 function editablePreview(t: Trip, previewId: string) {
   const p = t.previews.find((x) => x.id === previewId) ?? reject('Unknown price preview.');
@@ -368,18 +373,22 @@ export function paymentStatus(orderId: string, status: 'approved' | 'captured' |
   return null;
 }
 
-/** In-store bill: someone at the counter enters the store's PayPal email and total; it starts split equally among the
- * members on it. Once everyone on it accepts, each gets a PayPal request that pays the store directly. */
-export function createStoreBill(t: Trip, m: number, b: { vendor: string; email: string; total: number; category: string; members: number[] }): Preview {
+/** In-store bill: someone at the counter enters the store's PayPal email, total and split (equal among the members on it
+ * unless bps is given). Once everyone on it accepts, each gets a PayPal request that pays the store directly.
+ * If the person adding it takes 100%, nobody else has to accept. */
+export function createStoreBill(t: Trip, m: number, b: { vendor: string; email: string; total: number; category: string; members: number[]; bps?: number[] }): Preview {
   if (t.phase === 'SETTLED') reject('This trip is settled.');
-  const on = [...new Set(b.members)].filter((i) => i >= 0 && i < t.members.length);
-  if (!on.includes(m)) on.push(m);
+  if (b.bps && (b.bps.length !== t.members.length || b.bps.reduce((a, x) => a + x, 0) !== 10000)) reject('Split must cover every member and total 100%.');
+  const on = b.bps ? b.bps.flatMap((x, i) => (x ? [i] : [])) : [...new Set(b.members)].filter((i) => i >= 0 && i < t.members.length);
+  if (!b.bps && !on.includes(m)) on.push(m);
   const eq = equalBps(on.length);
+  const bps = b.bps ?? t.members.map((_, i) => (on.includes(i) ? eq[on.indexOf(i)] : 0));
+  const all = bps[m] === 10000;
   const p: Preview = {
     id: id(), option_id: '', kind: 'store', title: b.vendor, meta: `In-store · added by ${t.members[m].name}`,
     payee: { name: b.vendor, email: b.email.trim().toLowerCase() }, category: b.category,
     total_cents: b.total, currency: t.currency, prepaid: false, frozen: false, is_estimate: true,
-    shares: t.members.map((_, i) => ({ member: i, ratio_bp: on.includes(i) ? eq[on.indexOf(i)] : 0, accepted: !on.includes(i), status: 'none' })),
+    shares: bps.map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: all || !ratio_bp, status: 'none' as const })),
   };
   t.previews.push(p);
   return p;

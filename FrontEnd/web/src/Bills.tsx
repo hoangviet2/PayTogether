@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
-import { money, pct, shareAmounts, type Preview, type Share } from '../../shared/trip';
+import { equalBps, money, pct, shareAmounts, type Preview, type Share } from '../../shared/trip';
 import type { Ctx } from './api';
 import { Icon, icons, PayShare, PreviewCard } from './ui';
 
@@ -99,37 +99,46 @@ export function Bills({ ctx }: { ctx: Ctx }) {
 /** In-store checkout for things nobody planned (a dinner, a ticket at the door): each person pays the store's PayPal. */
 function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
   const { trip, me, act } = ctx;
-  const [who, setWho] = useState<number[]>(trip.members.map((_, i) => i));
+  // Percent per member as typed; 0 means not on the bill. Starts equal.
+  const [pcts, setPcts] = useState(() => equalBps(trip.members.length).map((b) => String(b / 100)));
+  const bps = trip.solo ? trip.members.map((_, i) => (i === me ? 10000 : 0)) : pcts.map((v) => Math.round((parseFloat(v) || 0) * 100));
+  const sum = bps.reduce((a, b) => a + b, 0);
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const total = Math.round(parseFloat(String(f.get('total'))) * 100);
-    await act('/store-bills', { vendor: String(f.get('vendor')).trim(), email: String(f.get('email')).trim(), total, category: f.get('category'), members: trip.solo ? [me] : who });
+    await act('/store-bills', { vendor: String(f.get('vendor')).trim(), email: String(f.get('email')).trim(), total, category: f.get('category'), members: [], bps });
     onDone();
   };
   return (
     <form onSubmit={submit} className="col" style={{ gap: 12, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 14, padding: 16 }}>
-      <p className="small muted">For costs nobody planned, like a dinner. The store must accept PayPal. {trip.solo ? 'You' : 'Everyone on the bill'} accepts the amount, then pays the store’s PayPal directly.</p>
+      <p className="small muted">For costs nobody planned, like a dinner. The store must accept PayPal. {trip.solo ? 'You accept' : 'Everyone on the bill accepts'} the amount, then pays the store’s PayPal directly.{trip.solo ? '' : ' If you take 100%, nobody else has to accept.'}</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <label className="field">Store<input name="vendor" required maxLength={60} placeholder="Pho 24" /></label>
-        <label className="field">Store’s PayPal email<input name="email" type="email" required placeholder="pay@store.com" /></label>
+        <label className="field">Store’s PayPal email<input name="email" type="email" required placeholder="pay@store.com" aria-describedby="store-email-hint" />
+          <span id="store-email-hint" className="small muted" style={{ fontWeight: 400 }}>Email only. PayPal can’t pay a phone number.</span></label>
         <label className="field">Total ({trip.currency})<input name="total" inputMode="decimal" required pattern="\d+(\.\d{1,2})?" placeholder="42.50" /></label>
         <label className="field">Type<select name="category">{['Restaurant', 'Store', 'Transport', 'Tickets', 'Other'].map((c) => <option key={c}>{c}</option>)}</select></label>
       </div>
       {!trip.solo && (
-        <fieldset className="row" style={{ border: 'none', padding: 0, margin: 0, flexWrap: 'wrap', gap: 10 }}>
-          <legend className="field" style={{ marginBottom: 6 }}>Who’s on this bill (split equally; each can move their own bar)</legend>
-          {trip.members.map((m, i) => (
-            <label key={i} className="row" style={{ gap: 4, fontSize: 14, minHeight: 44 }}>
-              <input type="checkbox" checked={who.includes(i)} disabled={i === me} onChange={() => setWho((w) => (w.includes(i) ? w.filter((x) => x !== i) : [...w, i]))} />
-              <span style={{ color: m.color }}>{m.symbol}</span>{m.name}{i === me ? ' (you)' : ''}
-            </label>
-          ))}
+        <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
+          <legend className="field" style={{ marginBottom: 6 }}>Split (0% = not on the bill; each can still move their own bar later)</legend>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
+            {trip.members.map((m, i) => (
+              <label key={i} className="row" style={{ gap: 6, fontSize: 14, minHeight: 44 }}>
+                <span style={{ color: m.color }}>{m.symbol}</span>{m.name}{i === me ? ' (you)' : ''}
+                <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
+                  onChange={(e) => setPcts((p) => p.map((v, j) => (j === i ? e.target.value : v)))} />%
+              </label>
+            ))}
+            <button type="button" className="btn" onClick={() => setPcts(trip.members.map((_, i) => (i === me ? '100' : '0')))}>I’ll pay 100%</button>
+          </div>
+          {sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {pct(sum)}; they need to total 100%.</p>}
         </fieldset>
       )}
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" className="btn" onClick={onDone}>Cancel</button>
-        <button type="submit" className="btn btn-primary">Add bill</button>
+        <button type="submit" className="btn btn-primary" disabled={sum !== 10000}>Add bill</button>
       </div>
     </form>
   );
