@@ -15,9 +15,15 @@ const newCode = (): string => {
   return [...trips.values()].some((t) => t.code === c) ? newCode() : c;
 };
 for (const t of trips.values()) t.code ??= newCode(); // trips saved before join codes existed
+// Everyone who has logged in, so a trip owner can invite an account by its PayPal email. Kept beside the trips file.
+const USERS_FILE = FILE.replace(/(\.json)?$/, '.users.json');
+export const users = new Map<string, { name: string; email: string | null }>(existsSync(USERS_FILE) ? Object.entries(JSON.parse(readFileSync(USERS_FILE, 'utf8'))) : []);
 export const save = () => {
-  if (process.env.DATA_FILE !== ':memory:') writeFileSync(FILE, JSON.stringify(Object.fromEntries(trips)));
+  if (process.env.DATA_FILE === ':memory:') return;
+  writeFileSync(FILE, JSON.stringify(Object.fromEntries(trips)));
+  writeFileSync(USERS_FILE, JSON.stringify(Object.fromEntries(users)));
 };
+export const remember = (user: string, name: string, email: string | null) => users.set(user, { name, email });
 const id = () => randomUUID().slice(0, 8);
 const now = () => new Date().toISOString();
 export class Rejected extends Error {}
@@ -51,9 +57,24 @@ export function join(t: Trip, name: string, user: string): number {
   if (PHASES.indexOf(t.phase) >= PHASES.indexOf('PRICING')) reject('This trip is already splitting prices, so new members can no longer join.');
   if (t.members.length >= PALETTE.length) reject(`A trip can have at most ${PALETTE.length} members.`);
   t.members.push({ name, ...PALETTE[t.members.length], user });
+  t.invites = t.invites?.filter((i) => i.user !== user);
   say(t, 'ai', `${name} joined the trip 👋`);
   return t.members.length - 1;
 }
+
+/** Invites a PayTogether account by PayPal email; they join by accepting on their home page. */
+export function invite(t: Trip, email: string) {
+  if (t.solo) reject('This is a solo trip, so nobody else can join it.');
+  if (PHASES.indexOf(t.phase) >= PHASES.indexOf('PRICING')) reject('This trip is already splitting prices, so new members can no longer join.');
+  const e = email.trim().toLowerCase();
+  const found = [...users].find(([, u]) => u.email === e);
+  if (!found) reject('No PayTogether account uses that email yet. Ask them to log in with PayPal once, or send them the join code.');
+  const [user, { name }] = found!;
+  if (memberOf(t, user) >= 0) reject(`${name} is already in this trip.`);
+  if (!t.invites?.some((i) => i.user === user)) (t.invites ??= []).push({ user, name });
+  return name;
+}
+export const invitesFor = (user: string) => [...trips.values()].filter((t) => t.invites?.some((i) => i.user === user));
 
 export const say = (t: Trip, from: number | 'ai', text: string) => t.chat.push({ from, at: now(), text });
 

@@ -3,14 +3,14 @@ import { api, finishLogin, getSession, useTrip, type Ctx } from './api';
 import type { Trip } from '../../shared/trip';
 import { Chat, TripHeader } from './ui';
 import { Login } from './Entry';
-import { Home, NewTrip, Trips } from './Home';
+import { GroupSetup, Home, NewTrip, Trips } from './Home';
 import { Plan } from './Plan';
 import { Schedule } from './Schedule';
 import { Spending } from './Spending';
 import { Dashboard } from './Dashboard';
 import { Shop } from './Shop';
 
-// Routes: #/ landing (signed out) · #/home · #/trips · #/new · #/join · #/trip/{id}/{plan|schedule|spending|dashboard|shop}
+// Routes: #/ landing (signed out) · #/home · #/trips · #/new · #/join · #/setup/{id} · #/trip/{id}/{plan|schedule|spending|dashboard|shop}
 const useHash = () => {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
@@ -29,6 +29,8 @@ export default function App() {
   if (!getSession()) return <Login error={login.error} />; // every page past the landing needs Log in with PayPal
   if (route === 'trips') return <Trips />;
   if (route === 'new' || route === 'join') return <NewTrip key={route} mode={route === 'new' ? 'create' : 'join'} />;
+  const setup = route.match(/^setup\/([\w-]+)/);
+  if (setup) return <GroupSetup key={setup[1]} id={setup[1]} />;
   const m = route.match(/^trip\/([\w-]+)\/?(\w+)?/);
   if (!m) return <Home />; // #/, #/home and unknown routes
   return <Workspace key={m[1]} id={m[1]} tab={m[2] ?? 'plan'} />;

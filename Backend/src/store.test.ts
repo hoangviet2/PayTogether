@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import * as s from './store.ts';
 
 function pricedTrip() {
-  const t = s.createTrip('Test', 'USD', ['Ana', 'Ben', 'Cy']);
+  const t = s.createTrip('Test', 'USD', ['Ana', 'Ben', 'Cy']); // three members already, so the group rule passes
   s.proposeDestinations(t, ['Lisbon'], '2027-05-14', '2027-05-17');
   [0, 1, 2].forEach((m) => s.confirm(t, m));
   assert.deepEqual(s.draftTimeline(t, [{ destination: { name: 'Lisbon', country: 'PT' }, nights: 3, arrive_date: '2027-05-14', depart_date: '2027-05-17' }]), []);
@@ -92,4 +92,22 @@ test('solo trip refuses joins; dates must run forward', () => {
   assert.equal(s.join(t, 'Ana', 'pp-ana'), 0); // the owner re-joining is still fine
   assert.throws(() => s.join(t, 'Ben', 'pp-ben'), s.Rejected);
   assert.throws(() => s.createTrip('Bad', 'USD', ['Ana'], 'pp-ana', { window: { start: '2027-05-17', end: '2027-05-14' } }), s.Rejected);
+});
+
+test('group trip: confirm waits for a second member; invite by email, accept joins', () => {
+  const t = s.createTrip('G', 'USD', ['Ana'], 'pp-ana');
+  s.proposeDestinations(t, ['Lisbon'], '2027-05-14', '2027-05-17');
+  assert.throws(() => s.confirm(t, 0), /at least one more person/);
+  assert.throws(() => s.invite(t, 'nobody@x.com'), /No PayTogether account/);
+  s.remember('pp-ben', 'Ben', 'ben@x.com');
+  assert.equal(s.invite(t, ' BEN@x.com '), 'Ben');
+  s.invite(t, 'ben@x.com'); // inviting twice keeps one invite
+  assert.equal(t.invites!.length, 1);
+  assert.deepEqual(s.invitesFor('pp-ben').map((x) => x.id), [t.id]);
+  s.join(t, 'Ben', 'pp-ben');
+  assert.equal(t.invites!.length, 0);
+  assert.throws(() => s.invite(t, 'ben@x.com'), /already in this trip/);
+  assert.equal(s.confirm(t, 0), null); // 2 members now: confirm counts, waits for Ben
+  const solo = s.createTrip('S', 'USD', ['Ana'], 'pp-ana', { solo: true });
+  assert.throws(() => s.invite(solo, 'ben@x.com'), /solo trip/);
 });

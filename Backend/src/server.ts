@@ -82,7 +82,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 
   if (a === 'auth' && b === 'paypal' && is('POST', 3)) {
     const { code } = await body(req, z.object({ code: z.string().min(1).max(2000) }));
-    const u = await ext.paypalUser(code).catch((e) => { throw e instanceof ext.NotConfigured ? e : new HttpError(401, e.message); });
+    const { email, ...u } = await ext.paypalUser(code).catch((e) => { throw e instanceof ext.NotConfigured ? e : new HttpError(401, e.message); });
+    store.remember(u.user, u.name, email);
+    persist();
     return send({ session: ext.newSession(u), ...u });
   }
 
@@ -112,10 +114,33 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return send(store.createTrip(i.name, i.currency, [u.name], u.user, { solo: i.solo, window }), 201); // friends join with the trip's code
   }
 
+  if (a === 'invites' && is('GET', 2)) {
+    const { user } = session(req);
+    return send(store.invitesFor(user).map((t) => ({ id: t.id, name: t.name, by: t.members[0].name, members: t.members.length })));
+  }
+
+  if (a === 'trips' && b && (c === 'accept' || c === 'decline') && is('POST', 4)) {
+    const u = session(req);
+    const t = tripOr404(b);
+    if (!t.invites?.some((i) => i.user === u.user)) throw new HttpError(403, 'You have no invite to this trip.');
+    if (c === 'accept') store.join(t, u.name, u.user);
+    else t.invites = t.invites.filter((i) => i.user !== u.user);
+    persist();
+    return send(c === 'accept' ? t : { ok: true });
+  }
+
   if (a === 'trips' && b) {
     const t = tripOr404(b);
     const m = member(req, t);
     if (is('GET', 3)) return send(t);
+
+    if (c === 'invite' && is('POST', 4)) {
+      const { email } = await body(req, z.object({ email: z.string().trim().email().max(254) }));
+      const who = store.invite(t, email);
+      store.say(t, 'ai', `${t.members[m].name} invited ${who}. They'll join once they accept.`);
+      persist();
+      return send(t);
+    }
 
     if (c === 'messages' && is('POST', 4)) {
       const { text } = await body(req, z.object({ text: z.string().trim().min(1).max(2000) }));

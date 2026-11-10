@@ -60,7 +60,7 @@ export const loginUrl = () => ready.paypal
   : null;
 
 /** Trades the code PayPal sent back for who the user is. */
-export async function paypalUser(code: string): Promise<{ user: string; name: string }> {
+export async function paypalUser(code: string): Promise<{ user: string; name: string; email: string | null }> {
   need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');
   const r = await fetch(`${PP}/v1/oauth2/token`, {
     method: 'POST',
@@ -75,7 +75,8 @@ export async function paypalUser(code: string): Promise<{ user: string; name: st
   const user = d.payer_id ?? d.user_id;
   if (!user) throw new Error('PayPal did not return a user id.');
   const name = (d.name ?? [d.given_name, d.family_name].filter(Boolean).join(' ')) || d.email || d.emails?.[0]?.value || 'PayPal user';
-  return { user, name: name.slice(0, 60) };
+  const email = d.email ?? d.emails?.[0]?.value ?? null;
+  return { user, name: name.slice(0, 60), email: email?.toLowerCase() ?? null };
 }
 
 // Stateless signed session: payload.signature. shortcut: no revocation before expiry; store sessions when that matters.

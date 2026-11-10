@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { PHASE_LABEL, money, mySummary, type Person, type Trip } from '../../shared/trip';
-import { api, getSession, setSession } from './api';
+import { api, getSession, setSession, useTrip } from './api';
 import { Chip, Icon, icons, Logo } from './ui';
 
 export type TripRow = Pick<Trip, 'id' | 'name' | 'phase' | 'currency' | 'members' | 'destinations' | 'window'> & { solo: boolean; mine: ReturnType<typeof mySummary> };
@@ -12,6 +12,10 @@ const alert = { background: 'var(--orange-tint)', color: 'var(--orange-ink)', pa
 const h2 = { fontSize: 19 };
 const striped = 'repeating-linear-gradient(135deg, #009CDE 0 3px, #BFE6F7 3px 6px)';
 const pillFor = (p: Trip['phase']) => (p === 'SETTLED' ? 'pill-gray' : p === 'PRICING' || p === 'BOOKED' ? 'pill-orange' : 'pill-blue');
+
+/** A group trip still waiting for its second member opens on the invite step, not the workspace. */
+const tripHref = (t: Pick<TripRow, 'id' | 'solo' | 'members'>) => (!t.solo && t.members.length < 2 ? `#/setup/${t.id}` : `#/trip/${t.id}/plan`);
+type Invite = { id: string; name: string; by: string; members: number };
 
 function useTrips() {
   const [list, setList] = useState<TripRow[] | null>(null);
@@ -62,6 +66,16 @@ const CreateJoin = () => (
 
 export function Home() {
   const { list, error } = useTrips();
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  useEffect(() => { api<Invite[]>('/invites').then(setInvites).catch(() => {}); }, []);
+  const answer = async (id: string, accept: boolean) => {
+    try {
+      await api(`/trips/${id}/${accept ? 'accept' : 'decline'}`, { body: {} });
+      if (accept) location.hash = `#/trip/${id}/plan`;
+      else setInvites((v) => v.filter((x) => x.id !== id));
+    } catch (e) { setInviteError((e as Error).message); }
+  };
   const first = getSession()?.name.split(' ')[0] ?? '';
   if (!list) return <><TopBar active="home" /><p className="wrap" style={{ padding: 48 }} role={error ? 'alert' : undefined}>{error ?? 'Loading…'}</p></>;
 
@@ -158,7 +172,18 @@ export function Home() {
           <aside style={{ flex: '1 1 320px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 20 }}>
             <section className="card" aria-labelledby="todo-h" style={{ gap: 12, padding: 20 }}>
               <h2 id="todo-h" style={h2}>Needs you</h2>
-              {!todos.length && <p className="muted" style={{ fontSize: 14 }}>You’re all caught up — nothing to accept or pay.</p>}
+              {inviteError && <p role="alert" className="small" style={alert}>{inviteError}</p>}
+              {invites.map((x) => (
+                <div key={x.id} className="col" style={{ gap: 8, padding: 12, borderRadius: 12, background: 'var(--blue-tint)' }}>
+                  <strong style={{ fontSize: 14 }}>Trip invite: {x.name}</strong>
+                  <span className="small muted">{x.by} invited you · {x.members} member{x.members === 1 ? '' : 's'}</span>
+                  <span className="row" style={{ gap: 8 }}>
+                    <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => answer(x.id, true)}>Join trip</button>
+                    <button type="button" className="btn" onClick={() => answer(x.id, false)}>Decline</button>
+                  </span>
+                </div>
+              ))}
+              {!todos.length && !invites.length && <p className="muted" style={{ fontSize: 14 }}>You’re all caught up — nothing to accept or pay.</p>}
               {todos.map((x, k) => (
                 <div key={k} className="col" style={{ gap: 8, padding: 12, borderRadius: 12, background: x.cta === 'Pay my share' ? 'var(--orange-tint)' : 'var(--blue-tint)' }}>
                   <span className="between" style={{ fontSize: 14 }}><strong>{x.title}</strong><span className="mono">{x.cents == null ? '—' : money(x.cents, x.trip.currency)}</span></span>
@@ -174,7 +199,7 @@ export function Home() {
                 {!isNew && <a href="#/trips" style={{ fontSize: 14, fontWeight: 600 }}>All trips</a>}
               </div>
               {list.slice(0, 5).map((t) => (
-                <a key={t.id} href={`#/trip/${t.id}/plan`} className="between" style={{ alignItems: 'center', minHeight: 52, padding: '8px 0', borderTop: '1px solid var(--line-2)', textDecoration: 'none', color: 'var(--ink)' }}>
+                <a key={t.id} href={tripHref(t)} className="between" style={{ alignItems: 'center', minHeight: 52, padding: '8px 0', borderTop: '1px solid var(--line-2)', textDecoration: 'none', color: 'var(--ink)' }}>
                   <span className="col"><strong style={{ fontSize: 15 }}>{t.name}</strong><span style={{ fontSize: 12 }} className="muted">{meta(t)}</span></span>
                   <span className={`pill ${pillFor(t.phase)}`}>{PHASE_LABEL[t.phase]}</span>
                 </a>
@@ -232,7 +257,7 @@ export function Trips() {
         {list && !list.length && <p className="muted" style={{ fontSize: 16 }}>No trips yet. Create one, or join with the code a friend sent you.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 20 }}>
           {list?.map((t) => (
-            <a key={t.id} href={`#/trip/${t.id}/plan`} className="card" style={{ textDecoration: 'none', color: 'var(--ink)', gap: 18 }}>
+            <a key={t.id} href={tripHref(t)} className="card" style={{ textDecoration: 'none', color: 'var(--ink)', gap: 18 }}>
               <div className="between">
                 <div className="col">
                   <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>{t.name}</span>
@@ -262,7 +287,7 @@ export function NewTrip({ mode }: { mode: 'create' | 'join' }) {
     setBusy(true);
     try {
       const t = await api<Trip>(path, { body: body(new FormData(e.currentTarget)) });
-      location.hash = `#/trip/${t.id}/plan`;
+      location.hash = tripHref({ ...t, solo: !!t.solo });
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
@@ -316,10 +341,10 @@ export function NewTrip({ mode }: { mode: 'create' | 'join' }) {
             </fieldset>
             {solo
               ? note('Every bill is 100% yours and charged to your PayPal. You still get Wayfinder, the schedule and the spending dashboard. A solo trip can’t take other members later.')
-              : note('After you create it, the trip header shows a 6-character join code. Send it to who’s coming: they log in with PayPal and enter it under Join a trip. New bills start split equally, and everyone moves only their own bar.')}
+              : note('Next you’ll add at least one more person: invite their PayTogether account by PayPal email, or send them the trip’s join code. The trip opens once someone has joined. New bills start split equally, and everyone moves only their own bar.')}
             <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap', gap: 10, borderTop: '1px solid var(--line-2)', paddingTop: 20 }}>
               <a href="#/home" className="btn" style={{ minHeight: 48, padding: '0 20px', fontSize: 15 }}>Cancel</a>
-              <button type="submit" disabled={busy} className="btn btn-primary" style={{ minHeight: 48, padding: '0 22px', fontSize: 15 }}>{solo ? 'Create solo trip' : 'Create group trip'}</button>
+              <button type="submit" disabled={busy} className="btn btn-primary" style={{ minHeight: 48, padding: '0 22px', fontSize: 15 }}>{solo ? 'Create solo trip' : 'Create trip & add people'}</button>
             </div>
           </form>
         ) : (
@@ -335,6 +360,83 @@ export function NewTrip({ mode }: { mode: 'create' | 'join' }) {
             </div>
           </form>
         )}
+      </main>
+    </div>
+  );
+}
+
+/** #/setup/{id}: a new group trip waits here until at least one other account has joined. */
+export function GroupSetup({ id }: { id: string }) {
+  const { trip, setTrip, error, setError } = useTrip(id); // polls, so a friend joining shows up on its own
+  const [copied, setCopied] = useState(false);
+  if (!trip) return <><TopBar /><p className="wrap" style={{ padding: 48 }} role={error ? 'alert' : undefined}>{error ?? 'Loading trip…'}</p></>;
+
+  const ready = trip.solo || trip.members.length >= 2;
+  const invite = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    try {
+      setTrip(await api<Trip>(`/trips/${id}/invite`, { body: { email: String(new FormData(form).get('email')) } }));
+      setError(null);
+      form.reset();
+    } catch (err) { setError((err as Error).message); }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      <TopBar />
+      <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px 64px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <section className="card" aria-labelledby="gs-h" style={{ borderRadius: 20, padding: 28, gap: 22 }}>
+          <div className="col" style={{ gap: 6 }}>
+            <h1 id="gs-h" style={{ fontSize: 30, letterSpacing: '-0.02em' }}>Add people to {trip.name}</h1>
+            <p className="muted" style={{ fontSize: 15 }}>A group trip needs at least one more person. Use either way below.</p>
+          </div>
+          {error && <p role="alert" className="small" style={alert}>{error}</p>}
+
+          <div className="col" style={{ gap: 8 }}>
+            <h2 style={{ fontSize: 18 }}>Send the join code</h2>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 10, background: 'var(--bg)', border: '1px dashed var(--input)', borderRadius: 12, padding: '10px 12px' }}>
+              <span className="mono" style={{ flex: '1 1 160px', fontSize: 24, fontWeight: 600, letterSpacing: '0.16em' }}>{trip.code}</span>
+              <button type="button" className="btn btn-primary" onClick={() => navigator.clipboard?.writeText(trip.code).then(() => setCopied(true), () => {})}>{copied ? 'Copied' : 'Copy code'}</button>
+            </div>
+            <p className="small muted">They log in with PayPal, choose Join a trip, and enter this code.</p>
+          </div>
+
+          <form onSubmit={invite} className="col" style={{ gap: 8 }}>
+            <h2 style={{ fontSize: 18 }}>Or invite their account</h2>
+            <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <label htmlFor="invite-email" className="sr-only">Their PayPal email</label>
+              <input id="invite-email" name="email" type="email" required placeholder="Their PayPal email" autoComplete="off"
+                style={{ flex: '1 1 260px', minHeight: 48, border: '1px solid var(--input)', borderRadius: 12, padding: '0 14px', fontSize: 15 }} />
+              <button type="submit" className="btn" style={{ minHeight: 48, padding: '0 20px', fontSize: 15, borderColor: 'var(--brand)', color: 'var(--brand)' }}>Invite</button>
+            </div>
+            <p className="small muted">Works for anyone who has logged in to PayTogether before. The invite waits on their home page until they accept.</p>
+          </form>
+
+          <div className="col" style={{ gap: 2 }}>
+            <h2 style={{ fontSize: 18, marginBottom: 6 }}>Who’s in · {trip.members.length}</h2>
+            {trip.members.map((m) => (
+              <div key={m.name + m.symbol} className="row" style={{ minHeight: 52, borderBottom: '1px solid var(--line-2)' }}>
+                <Chip p={m} size={34} />
+                <span className="col" style={{ flex: 1 }}><strong style={{ fontSize: 15 }}>{m.name}{m.user === getSession()?.user ? ' (you)' : ''}</strong><span style={{ fontSize: 12 }} className="muted">Joined</span></span>
+                <Icon d={icons.check} />
+              </div>
+            ))}
+            {trip.invites?.map((i) => (
+              <div key={i.user} className="row" style={{ minHeight: 52, borderBottom: '1px solid var(--line-2)' }}>
+                <span className="chip" style={{ width: 34, height: 34, background: 'var(--gray-tint)', color: 'var(--body)' }} aria-hidden="true"><Icon d={icons.clock} size={16} /></span>
+                <span className="col" style={{ flex: 1 }}><strong style={{ fontSize: 15 }}>{i.name}</strong><span style={{ fontSize: 12 }} className="muted">Invited · waiting for them to accept</span></span>
+              </div>
+            ))}
+          </div>
+
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, borderTop: '1px solid var(--line-2)', paddingTop: 20 }}>
+            <span className="small muted" role="status">{ready ? 'Someone has joined, so the trip is ready.' : 'Waiting for at least one person to join…'}</span>
+            {ready
+              ? <a href={`#/trip/${id}/plan`} className="btn btn-primary" style={{ minHeight: 48, padding: '0 22px', fontSize: 15 }}>Continue to trip</a>
+              : <button type="button" disabled className="btn btn-primary" style={{ minHeight: 48, padding: '0 22px', fontSize: 15 }}>Continue to trip</button>}
+          </div>
+        </section>
       </main>
     </div>
   );

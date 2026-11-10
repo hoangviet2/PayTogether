@@ -290,6 +290,7 @@ export type Trip = {
   window: { start: string; end: string } | null; budget_per_person_cents?: number;
   destinations: string[]; legs: Leg[]; polls: Poll[]; previews: Preview[]; chat: LiveMsg[]; txs: Txn[];
   confirms: number[]; busy: boolean; solo?: boolean; // solo: one traveler, join code closed
+  invites?: { user: string; name: string }[]; // accounts invited by email that haven't accepted yet
 };
 
 export const money = (cents: number, currency: string) =>
@@ -410,6 +411,7 @@ export function mySummary(t: Trip, m: number) {
 
 /** Why the group can't press Confirm yet, or null when it can (ai.md §2). */
 export function confirmBlocker(t: Trip): string | null {
+  if (!t.solo && t.members.length < 2) return 'A group trip needs at least one more person. Share the join code or invite them by email.';
   switch (t.phase) {
     case 'DESTINATIONS': return t.destinations.length && t.window ? null : 'Tell Wayfinder where and when you want to go first.';
     case 'TIMELINE': return validateTimeline(t.legs, t.window)[0] ?? null;
