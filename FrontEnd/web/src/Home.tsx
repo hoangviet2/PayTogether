@@ -20,7 +20,7 @@ function useTrips() {
   const [list, setList] = useState<TripRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { api<TripRow[]>('/trips').then(setList).catch((e) => setError(e.message)); }, []);
-  return { list, error };
+  return { list, setList, error, setError };
 }
 
 /** Trips can be in different currencies, so totals stay per currency: "€12.00 + $5.00". Nothing yet reads $0.00. */
@@ -237,7 +237,16 @@ const Cat = ({ type, value, pct }: { type: string; value: string; pct: number })
 );
 
 export function Trips() {
-  const { list, error } = useTrips();
+  const { list, setList, error, setError } = useTrips();
+  const me = getSession()?.user;
+  // Same rule as the trip header: only the creator (member 0), and the server refuses once PayPal requests exist.
+  const remove = async (t: TripRow) => {
+    if (!confirm(`Delete “${t.name}” for everyone in it? The chat, plan and bills go too. This can’t be undone.`)) return;
+    try {
+      await api(`/trips/${t.id}`, { method: 'DELETE' });
+      setList((l) => l?.filter((x) => x.id !== t.id) ?? null);
+    } catch (e) { setError((e as Error).message); }
+  };
   return (
     <div style={{ minHeight: '100vh' }}>
       <TopBar active="trips" />
@@ -250,7 +259,8 @@ export function Trips() {
         {list && !list.length && <p className="muted" style={{ fontSize: 16 }}>No trips yet. Create one, or join with the code a friend sent you.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 20 }}>
           {list?.map((t) => (
-            <a key={t.id} href={tripHref(t)} className="card" style={{ textDecoration: 'none', color: 'var(--ink)', gap: 18 }}>
+            <div key={t.id} className="col" style={{ gap: 8 }}>
+            <a href={tripHref(t)} className="card" style={{ textDecoration: 'none', color: 'var(--ink)', gap: 18, flex: 1 }}>
               <div className="between">
                 <div className="col">
                   <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 24 }}>{t.name}</span>
@@ -262,6 +272,10 @@ export function Trips() {
                 {t.members.map((m: Person) => <Chip key={m.name} p={m} size={30} />)}
               </div>
             </a>
+            {t.members[0]?.user === me && (
+              <button type="button" className="btn" style={{ alignSelf: 'flex-end', color: 'var(--orange-ink)' }} onClick={() => remove(t)}>Delete trip</button>
+            )}
+            </div>
           ))}
         </div>
       </main>
