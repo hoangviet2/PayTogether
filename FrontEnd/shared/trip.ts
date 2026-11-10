@@ -284,7 +284,7 @@ export type Poll = { id: string; kind: 'destination' | 'stay' | 'dining' | 'cust
 export type ShareStatus = 'none' | 'created' | 'approved' | 'captured' | 'failed';
 export type Share = { member: number; ratio_bp: number; accepted: boolean; status: ShareStatus; order_id?: string };
 export type Preview = {
-  id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining' | 'store'; title: string; meta: string;
+  id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining' | 'store' | 'shop'; title: string; meta: string;
   payee?: { name: string; email: string }; category?: string; // store bills: each member pays the store's PayPal directly
   total_cents: number; currency: string; prepaid: boolean; shares: Share[]; frozen: boolean; is_estimate: true;
 };

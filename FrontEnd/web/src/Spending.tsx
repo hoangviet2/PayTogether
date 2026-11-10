@@ -28,7 +28,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
 
   const active = q.trim() ? hit : null;
   const rows = useMemo<Row[]>(
-    () => trip.txs.filter((t) => !active || active.ids.has(t.id)).map((t) => ({ ...t, memberName: trip.members[t.member].name, paidByName: trip.members[t.paid_by].name })),
+    () => trip.txs.filter((t) => !active || active.ids.has(t.id)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map((t) => ({ ...t, memberName: trip.members[t.member].name, paidByName: trip.members[t.paid_by].name })),
     [trip.txs, trip.members, active],
   );
   const columnDefs = useMemo<ColDef<Row>[]>(() => {
@@ -37,7 +37,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
     // Each person's rows in their own color, with their symbol so color isn't the only cue.
     { field: 'memberName', headerName: 'Member', pinned: 'left',
       valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}` : p.value), cellStyle: (p) => (p.data ? { color: trip.members[p.data.member].color, fontWeight: 600 } : null) },
-    { field: 'date', headerName: 'Date', sort: 'asc', width: 120 },
+    { field: 'date', headerName: 'Date', width: 120 },
     { field: 'time', width: 90 },
     { field: 'vendor' },
     { field: 'type', width: 120 },
@@ -50,7 +50,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
     { field: 'status', width: 110, cellClass: (p) => (p.value ? `status st-${p.value}` : '') },
   ];
   }, [trip.currency, trip.members]);
-  const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true }), []);
+  const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []); // no header sorting; rows stay in date order
   const s = summarizeTrip(trip);
 
   return (

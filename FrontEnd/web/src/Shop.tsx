@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { money } from '../../shared/trip';
+import { money, type Trip } from '../../shared/trip';
 import { api, type Ctx } from './api';
-import { Icon, icons } from './ui';
+import { Icon, icons, PayShare } from './ui';
 
 type Hit = { id: string; title: string; image?: string; offers: { domain: string; url: string; cents: number; currency: string; inStock: boolean }[] };
-type Session = { session_id: string; live_view_url?: string; title: string };
+type Paying = { previewId: string; orderId: string; title: string; cents: number };
 
 export function Shop({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
@@ -13,8 +13,8 @@ export function Shop({ ctx }: { ctx: Ctx }) {
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [opening, setOpening] = useState<string | null>(null); // product whose checkout is opening (a cloud browser takes a few seconds)
+  const [paying, setPaying] = useState<Paying | null>(null);
+  const [opening, setOpening] = useState<string | null>(null); // product whose PayPal order is being created
 
   const search = async (e: FormEvent) => {
     e.preventDefault();
@@ -30,22 +30,20 @@ export function Shop({ ctx }: { ctx: Ctx }) {
     }
   };
 
+  // Same flow as Pay in Spending: a PayPal order for the price, then PayPal opens here. It also lands in Bills and payments.
   const checkout = async (h: Hit) => {
+    const offer = h.offers[0];
     setError(null);
     setOpening(h.id);
     try {
-      if (session) await api(`/checkout/${session.session_id}`, { method: 'DELETE' });
-      const s = await api<Session>('/checkout', { body: { url: h.offers[0].url } });
-      setSession({ ...s, title: h.title });
+      const r = await api<{ trip: Trip; previewId: string }>(`/trips/${trip.id}/purchases`, { body: { title: h.title, url: offer.url, cents: offer.cents } });
+      const orderId = r.trip.previews.find((p) => p.id === r.previewId)?.shares[ctx.me].order_id;
+      if (orderId) setPaying({ previewId: r.previewId, orderId, title: h.title, cents: offer.cents });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setOpening(null);
     }
-  };
-  const end = async () => {
-    if (session) await api(`/checkout/${session.session_id}`, { method: 'DELETE' }).catch(() => {});
-    setSession(null);
   };
 
   return (
@@ -77,7 +75,9 @@ export function Shop({ ctx }: { ctx: Ctx }) {
                 {best && (
                   <div className="row" style={{ gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
                     <a className="btn btn-outline" href={best.url} target="_blank" rel="noreferrer noopener">Open merchant</a>
-                    <button type="button" className="btn btn-primary" disabled={opening === h.id} onClick={() => checkout({ ...h, offers: [best] })}>{opening === h.id ? 'Opening checkout…' : 'Checkout with PayPal'}</button>
+                    <button type="button" className="btn btn-primary" disabled={opening === h.id || best.currency !== trip.currency}
+                      title={best.currency !== trip.currency ? `Priced in ${best.currency}; this trip pays in ${trip.currency}` : undefined}
+                      onClick={() => checkout({ ...h, offers: [best] })}>{opening === h.id ? 'Starting PayPal…' : 'Checkout with PayPal'}</button>
                   </div>
                 )}
               </div>
@@ -87,21 +87,17 @@ export function Shop({ ctx }: { ctx: Ctx }) {
         </div>
       </section>
 
-      {session && (
-        <section className="card" aria-labelledby="ac-h">
-          <div className="col">
-            <span className="eyebrow">Checkout with PayPal · secure cloud browser</span>
-            <h2 id="ac-h" style={{ fontSize: 18 }}>{session.title}</h2>
+      {paying && (
+        <section className="card" aria-labelledby="pp-h">
+          <div className="between" style={{ alignItems: 'center' }}>
+            <div className="col">
+              <span className="eyebrow">Checkout with PayPal</span>
+              <h2 id="pp-h" style={{ fontSize: 18 }}>{paying.title} · {money(paying.cents, trip.currency)}</h2>
+            </div>
+            <button type="button" className="btn" onClick={() => setPaying(null)}>Close</button>
           </div>
-          {session.live_view_url
-            ? <iframe title="Live view of the merchant page" src={session.live_view_url} style={{ width: '100%', height: 520, border: '1px solid var(--line)', borderRadius: 12 }} allow="clipboard-read; clipboard-write" />
-            : <p className="muted">The browser is open but has no live view URL.</p>}
-          <p className="small" style={{ color: 'var(--body)', background: 'var(--gray-tint)', borderRadius: 10, padding: '10px 12px', lineHeight: 1.5 }}>
-            This is the store’s own checkout. Choose PayPal there and approve the payment in the live view; you’re paying the store directly. We only opened the page: we never type passwords or card numbers and never press Pay for you. The session closes itself after 10 minutes.
-          </p>
-          <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button type="button" className="btn" onClick={end}>End session</button>
-          </div>
+          <PayShare key={paying.orderId} ctx={ctx} previewId={paying.previewId} orderId={paying.orderId} currency={trip.currency} autoOpen label={`Pay ${money(paying.cents, trip.currency)}`} />
+          <p className="small muted">It’s also in Bills and payments on the Spending tab, so you can pay it later from there.</p>
         </section>
       )}
     </>

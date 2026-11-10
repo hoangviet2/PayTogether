@@ -175,3 +175,27 @@ test('delete trip: owner only, never once PayPal requests exist', () => {
   s.deleteTrip(t, 0);
   assert.equal(s.trips.has(t.id), false);
 });
+
+test('leave: their messages, votes and confirmations go; positions shift; refused for the owner or once there are bills', () => {
+  const t = s.createTrip('Leave', 'USD', ['Ana', 'Ben', 'Cy'], 'pp-ana');
+  s.say(t, 1, 'hi from Ben');
+  s.say(t, 2, 'hi from Cy');
+  t.confirms = [0, 1, 2];
+  const poll = s.createPoll(t, { kind: 'custom', question: 'Q', options: [{ name: 'A', price: null, source: 'web_search', why: 'x' }, { name: 'B', price: null, source: 'web_search', why: 'y' }] });
+  s.addOption(t, poll.id, 1, 'Bens pick');
+  poll.options[0].voters = [1, 2];
+  assert.throws(() => s.leave(t, 0), /Delete it instead/);
+  s.leave(t, 1);
+  assert.deepEqual(t.members.map((x) => x.name), ['Ana', 'Cy']);
+  assert.deepEqual(t.confirms, [0, 1]);
+  assert.equal(t.chat.some((c) => c.text === 'hi from Ben'), false); // gone from the disk
+  assert.equal(t.chat.find((c) => c.text === 'hi from Cy')!.from, 1);
+  assert.deepEqual(poll.options[0].voters, [1]);
+  assert.deepEqual([poll.options[2].added_by, poll.options[2].why], ['ai', 'Added by a member who left']);
+  assert.equal(JSON.stringify(t).includes('pp-ben'), false);
+  s.createPurchase(t, 1, { title: 'Adapter', url: 'https://shop.example/a', cents: 1999 });
+  assert.throws(() => s.leave(t, 1), /bills/);
+  const p = t.previews[0];
+  assert.deepEqual([p.kind, p.shares.map((x) => x.ratio_bp)], ['shop', [0, 10000]]);
+  assert.equal(s.ordersCreated(t, p, ['', 'O9'])[0].source, 'Online purchase');
+});

@@ -86,6 +86,37 @@ export function deleteTrip(t: Trip, m: number) {
   trips.delete(t.id);
 }
 
+/** A joined member leaves and their data goes with them: membership, chat messages, votes and confirmations.
+ * Members are stored by position, so this is allowed only before Pricing and while the trip has no bills or
+ * expenses; later positions shift down by one. Options they added stay (others may have voted) without their name. */
+export function leave(t: Trip, m: number) {
+  if (m === 0) reject('You created this trip. Delete it instead of leaving.');
+  if (PHASES.indexOf(t.phase) >= PHASES.indexOf('PRICING') || t.previews.length || t.txs.length) reject('This trip already has bills, so you can’t leave it now.');
+  const name = t.members[m].name;
+  const shift = (i: number) => (i > m ? i - 1 : i);
+  t.confirms = t.confirms.filter((i) => i !== m).map(shift);
+  for (const p of t.polls) for (const o of p.options) {
+    o.voters = o.voters.filter((i) => i !== m).map(shift);
+    if (o.added_by === m) Object.assign(o, { added_by: 'ai', why: 'Added by a member who left' });
+    else if (typeof o.added_by === 'number') o.added_by = shift(o.added_by);
+  }
+  t.chat = t.chat.filter((c) => c.from !== m).map((c) => (typeof c.from === 'number' ? { ...c, from: shift(c.from) } : c));
+  t.members.splice(m, 1);
+  say(t, 'ai', `${name} left the trip.`);
+}
+
+/** Buy a Shop item with PayPal: a one-person bill for the price, paid to PayTogether's PayPal like the stays. */
+export function createPurchase(t: Trip, m: number, i: { title: string; url: string; cents: number }): Preview {
+  const p: Preview = {
+    id: id(), option_id: '', kind: 'shop', title: i.title, meta: `Shop · ${new URL(i.url).hostname} · bought by ${t.members[m].name}`, category: 'Store',
+    total_cents: i.cents, currency: t.currency, prepaid: false, frozen: false, is_estimate: true,
+    shares: t.members.map((_, k) => ({ member: k, ratio_bp: k === m ? 10000 : 0, accepted: true, status: 'none' })),
+  };
+  t.previews.push(p);
+  return p;
+}
+export const dropPreview = (t: Trip, previewId: string) => { t.previews = t.previews.filter((p) => p.id !== previewId); };
+
 export const say = (t: Trip, from: number | 'ai', text: string) => t.chat.push({ from, at: now(), text });
 
 // ---------- confirm / phases (ai.md §2: any member proposes, all members must accept) ----------
@@ -306,7 +337,7 @@ export function ordersCreated(t: Trip, p: Preview, orderIds: string[]): Txn[] {
     return [{
       id: `${p.id}-${i}`, member: i, paid_by: i, date: leg?.arrive_date ?? now().slice(0, 10), time: p.payee ? now().slice(11, 16) : '15:00', vendor: p.title,
       type: p.kind === 'stay' ? 'Hotel' : p.category ?? 'Restaurant', leg: leg?.destination.name ?? '', amount: cents[i], total: p.total_cents,
-      shareBp: s.ratio_bp, source: p.payee ? 'In-store' : 'Prepaid share', status: 'created', nights: p.kind === 'stay' ? leg?.nights : undefined,
+      shareBp: s.ratio_bp, source: p.kind === 'shop' ? 'Online purchase' : p.payee ? 'In-store' : 'Prepaid share', status: 'created', nights: p.kind === 'stay' ? leg?.nights : undefined,
     }];
   });
   t.txs.push(...rows);

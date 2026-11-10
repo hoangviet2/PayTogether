@@ -64,7 +64,8 @@ const CreateJoin = () => (
 );
 
 export function Home() {
-  const { list, error } = useTrips();
+  const { list, setList, error, setError } = useTrips();
+  const gone = (id: string) => setList((l) => l?.filter((x) => x.id !== id) ?? null);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [inviteError, setInviteError] = useState<string | null>(null);
   useEffect(() => { api<Invite[]>('/invites').then(setInvites).catch(() => {}); }, []);
@@ -198,10 +199,13 @@ export function Home() {
                 {!isNew && <a href="#/trips" style={{ fontSize: 14, fontWeight: 600 }}>All trips</a>}
               </div>
               {list.slice(0, 5).map((t) => (
-                <a key={t.id} href={tripHref(t)} className="between" style={{ alignItems: 'center', minHeight: 52, padding: '8px 0', borderTop: '1px solid var(--line-2)', textDecoration: 'none', color: 'var(--ink)' }}>
-                  <span className="col"><strong style={{ fontSize: 15 }}>{t.name}</strong><span style={{ fontSize: 12 }} className="muted">{meta(t)}</span></span>
-                  <StatusPill t={t} />
-                </a>
+                <div key={t.id} className="row" style={{ gap: 8, minHeight: 52, padding: '8px 0', borderTop: '1px solid var(--line-2)' }}>
+                  <a href={tripHref(t)} className="between" style={{ flex: 1, minWidth: 0, alignItems: 'center', textDecoration: 'none', color: 'var(--ink)' }}>
+                    <span className="col"><strong style={{ fontSize: 15 }}>{t.name}</strong><span style={{ fontSize: 12 }} className="muted">{meta(t)}</span></span>
+                    <StatusPill t={t} />
+                  </a>
+                  <TripAction t={t} onGone={gone} onError={setError} />
+                </div>
               ))}
               {isNew && <p className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>No trips yet. Use Create a trip or Join a trip above.</p>}
             </section>
@@ -210,6 +214,22 @@ export function Home() {
       </main>
     </div>
   );
+}
+
+/** Delete for the person who created the trip, Leave for everyone who joined. The server enforces both rules. */
+function TripAction({ t, onGone, onError }: { t: TripRow; onGone: (id: string) => void; onError: (msg: string) => void }) {
+  const owner = t.members[0]?.user === getSession()?.user;
+  const run = async () => {
+    const ask = owner
+      ? `Delete “${t.name}” for everyone in it? The chat, plan and bills go too. This can’t be undone.`
+      : `Leave “${t.name}”? You can join again later with its code.`;
+    if (!confirm(ask)) return;
+    try {
+      await (owner ? api(`/trips/${t.id}`, { method: 'DELETE' }) : api(`/trips/${t.id}/leave`, { body: {} }));
+      onGone(t.id);
+    } catch (e) { onError((e as Error).message); }
+  };
+  return <button type="button" className="btn" style={{ color: 'var(--orange-ink)', flex: 'none' }} onClick={run} aria-label={`${owner ? 'Delete' : 'Leave'} ${t.name}`}>{owner ? 'Delete' : 'Leave'}</button>;
 }
 
 const meta = (t: TripRow) => [t.window ? `${t.window.start} → ${t.window.end}` : 'Dates not set', t.solo ? 'Just you' : `${t.members.length} member${t.members.length === 1 ? '' : 's'}`].join(' · ');
@@ -238,15 +258,7 @@ const Cat = ({ type, value, pct }: { type: string; value: string; pct: number })
 
 export function Trips() {
   const { list, setList, error, setError } = useTrips();
-  const me = getSession()?.user;
-  // Same rule as the trip header: only the creator (member 0), and the server refuses once PayPal requests exist.
-  const remove = async (t: TripRow) => {
-    if (!confirm(`Delete “${t.name}” for everyone in it? The chat, plan and bills go too. This can’t be undone.`)) return;
-    try {
-      await api(`/trips/${t.id}`, { method: 'DELETE' });
-      setList((l) => l?.filter((x) => x.id !== t.id) ?? null);
-    } catch (e) { setError((e as Error).message); }
-  };
+  const gone = (id: string) => setList((l) => l?.filter((x) => x.id !== id) ?? null);
   return (
     <div style={{ minHeight: '100vh' }}>
       <TopBar active="trips" />
@@ -272,9 +284,7 @@ export function Trips() {
                 {t.members.map((m: Person) => <Chip key={m.name} p={m} size={30} />)}
               </div>
             </a>
-            {t.members[0]?.user === me && (
-              <button type="button" className="btn" style={{ alignSelf: 'flex-end', color: 'var(--orange-ink)' }} onClick={() => remove(t)}>Delete trip</button>
-            )}
+            <span style={{ alignSelf: 'flex-end' }}><TripAction t={t} onGone={gone} onError={setError} /></span>
             </div>
           ))}
         </div>

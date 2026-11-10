@@ -182,6 +182,12 @@ const ensureIndex = () =>
     },
   })).catch((e) => { indexReady = null; throw e; })); // retry setup next time instead of caching the failure
 
+/** A deleted trip leaves nothing behind in search either. */
+export async function deleteTripDocs(tripId: string) {
+  if (!es) return;
+  await es.deleteByQuery({ index: INDEX, query: { term: { trip_id: tripId } }, ignore_unavailable: true, refresh: true });
+}
+
 /** The indexer. Only searchable fields go in: no PayPal emails, order ids or notes. */
 export async function indexTxn(tripId: string, t: Txn, people: Pick<Person, 'name'>[]) {
   if (!es) return;

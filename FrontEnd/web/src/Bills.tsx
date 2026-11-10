@@ -8,7 +8,7 @@ import { Icon, icons, PayShare, PreviewCard } from './ui';
 type Row = { id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
 type GridCtx = { pay: (r: Row) => void };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
-const KIND = { stay: 'Stay', dining: 'Dining', store: 'In-store' } as const;
+const KIND = { stay: 'Stay', dining: 'Dining', store: 'In-store', shop: 'Online' } as const;
 const PAID: Record<Share['status'], string> = { none: '—', created: 'Ready to pay', approved: 'Approved · capturing', captured: 'Paid', failed: 'Payment failed' };
 const payable = (r: Row) => r.isMe && !!r.orderId && (r.status === PAID.created || r.status === PAID.failed);
 
@@ -64,7 +64,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
     { field: 'status', headerName: 'Status', flex: 1, minWidth: 170 },
     { headerName: '', colId: 'pay', width: 130, cellRenderer: PayCell, sortable: false, filter: false },
   ], [trip.currency, trip.members]);
-  const defaultColDef = useMemo<ColDef>(() => ({ sortable: true, filter: true, resizable: true }), []);
+  const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []);
   const context = useMemo<GridCtx>(() => ({ pay: setPaying }), []);
   const mine = rows.filter((r) => r.isMe && payable(r));
 

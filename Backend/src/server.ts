@@ -156,9 +156,23 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     const t = tripOr404(b);
     const m = member(req, t);
     if (is('GET', 3)) return send(t);
+    if (c === 'leave' && is('POST', 4)) {
+      store.leave(t, m);
+      persist();
+      return send({ ok: true });
+    }
+    if (c === 'purchases' && is('POST', 4)) {
+      const i = await body(req, z.object({ title: z.string().trim().min(1).max(120), url: z.string().url().refine((u) => u.startsWith('https://'), 'https only'), cents: z.number().int().positive().max(100_000_00) }));
+      const p = store.createPurchase(t, m, i);
+      // The buyer is the only one on it, so the PayPal order goes out right away; no order, no bill.
+      try { await sendOrders(t, p.id, false); } catch (e) { store.dropPreview(t, p.id); throw e; }
+      persist();
+      return send({ trip: t, previewId: p.id });
+    }
     if (is('DELETE', 3)) {
       store.deleteTrip(t, m);
-      persist();
+      persist(); // rewrites the trips file on the disk without this trip
+      ext.deleteTripDocs(t.id).catch((e) => console.error('Elastic cleanup failed:', e.message));
       return send({ ok: true });
     }
 
@@ -278,7 +292,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 }
 
 /** Everyone accepted: one PayPal order per member, then freeze the preview. */
-async function sendOrders(t: Trip, previewId: string) {
+async function sendOrders(t: Trip, previewId: string, announce = true) {
   const p = t.previews.find((x) => x.id === previewId)!;
   const cents = shareAmounts(p)!;
   const payers = p.shares.flatMap((s, i) => (s.ratio_bp ? [i] : [])); // 0% shares get no order
@@ -289,7 +303,7 @@ async function sendOrders(t: Trip, previewId: string) {
   const ids = await workflows.offload(ext.ready.paypal, 'paypal-orders', [orders], () => Promise.all(orders.map(ext.createOrder)));
   const rows = store.ordersCreated(t, p, p.shares.map((_, i) => ids[payers.indexOf(i)] ?? ''));
   reindex(t, rows);
-  store.say(t, 'ai', `Everyone accepted ${p.title}. Your share is in Bills and payments on the Spending tab; pay it from there whenever you're ready.`);
+  if (announce) store.say(t, 'ai', `Everyone accepted ${p.title}. Your share is in Bills and payments on the Spending tab; pay it from there whenever you're ready.`);
 }
 
 createServer((req, res) => {
