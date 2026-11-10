@@ -4,6 +4,9 @@
 
 export type Member = { id: string; name: string; symbol: string; color: string; tint: string; me?: boolean };
 export type TxStatus = 'captured' | 'approved' | 'created' | 'logged' | 'failed';
+/** The three payment states members see. Approved in PayPal but not yet confirmed by the webhook is Verifying;
+ * a failed payment needs paying again; a logged expense was already paid at the counter. */
+export const payStage = (s: TxStatus) => (s === 'captured' || s === 'logged' ? 'Paid' : s === 'approved' ? 'Verifying' : 'Awaiting payment');
 export type Tx = {
   member: number; // index into members
   day: number; // day of May 2027

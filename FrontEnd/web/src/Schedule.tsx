@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type Ref } from 'react';
-import { equalBps, largestRemainder, money, tripDays, type Trip, type Txn } from '../../shared/trip';
+import { equalBps, largestRemainder, money, payStage, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
 import { Chip, Icon, icons } from './ui';
 
@@ -8,10 +8,12 @@ const weekday = (iso: string) => WEEK[new Date(iso + 'T00:00:00Z').getUTCDay()];
 const short = (iso: string) => `${weekday(iso)} ${Number(iso.slice(8))}`;
 const legOn = (t: Trip, d: string) => t.legs.find((l) => d >= l.arrive_date && d < l.depart_date)?.destination.name ?? null;
 
+const isPayment = (t: Txn) => t.source !== 'On-trip log';
 const evtStyle = (t: Txn, c: string, tint: string) => {
-  if (t.source !== 'Prepaid share' && t.source !== 'In-store') return { background: '#fff', borderColor: c, color: c };
-  if (t.status === 'captured') return { background: tint, borderColor: c, color: '#012169' };
-  return { background: '#fff', borderColor: c, borderStyle: 'dashed', color: '#012169' };
+  if (!isPayment(t)) return { background: '#fff', borderColor: c, color: c };
+  const stage = payStage(t.status);
+  if (stage === 'Paid') return { background: tint, borderColor: c, color: '#012169' };
+  return { background: '#fff', borderColor: c, borderStyle: stage === 'Verifying' ? 'dotted' : 'dashed', color: '#012169' };
 };
 
 export function Schedule({ ctx }: { ctx: Ctx }) {
@@ -75,10 +77,10 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
                   onLog(days[Math.min(days.length - 1, Math.floor(((e.clientX - r.left) / r.width) * days.length))]);
                 } : undefined}>
                 {trip.txs.filter((t) => t.member === i && t.status !== 'failed').map((t) => {
-                  const label = <>{t.vendor} · {money(t.amount, trip.currency)}{t.status === 'created' && ' · unpaid'}</>;
-                  const props = { className: 'evt', style: { ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }, title: `${t.vendor} · ${money(t.amount, trip.currency)} · ${t.status}` };
+                  const label = <>{t.vendor} · {money(t.amount, trip.currency)}{isPayment(t) && ` · ${payStage(t.status)}`}</>;
+                  const props = { className: 'evt', style: { ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }, title: `${t.vendor} · ${money(t.amount, trip.currency)}${isPayment(t) ? ` · ${payStage(t.status)}` : ' · logged expense'}` };
                   // Payments (stays, in-store bills) open in Spending, where they're paid and tracked.
-                  return t.source === 'Prepaid share' || t.source === 'In-store'
+                  return isPayment(t)
                     ? <a key={t.id} {...props} href={`#/trip/${trip.id}/spending`} style={{ ...props.style, textDecoration: 'none' }} title={`${props.title} · open in Spending`}>{label}</a>
                     : <span key={t.id} {...props}>{label}</span>;
                 })}
@@ -88,7 +90,7 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
         </div>
       </div>
       <div className="row small muted" style={{ flexWrap: 'wrap', gap: 16 }}>
-        <span>Solid fill: paid · dashed: not paid yet · outline: logged expense. Click a payment to open it in Spending.</span>
+        <span>Payments: dashed = awaiting payment · dotted = verifying with PayPal · solid fill = paid. Plain outline: logged expense. Click a payment to open it in Spending.</span>
         <span>Other members’ rows are read-only.</span>
       </div>
     </>

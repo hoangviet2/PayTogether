@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { money, mySummary, tripStatus, type Person, type Trip } from '../../shared/trip';
+import { money, mySummary, payStage, tripStatus, type Person, type Trip } from '../../shared/trip';
 import { api, getSession, setSession, useTrip } from './api';
 import { BackLink, Chip, Icon, icons, Logo, StatusPill } from './ui';
 
@@ -10,6 +10,11 @@ const person = 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0';
 const group = 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7M18 14a7 7 0 0 1 4 7';
 const alert = { background: 'var(--orange-tint)', color: 'var(--orange-ink)', padding: '10px 14px', borderRadius: 10 };
 const h2 = { fontSize: 19 };
+const STAGE_STYLE = {
+  'Awaiting payment': { background: 'var(--orange-tint)', color: 'var(--orange-ink)' },
+  Verifying: { background: 'var(--gray-tint)', color: 'var(--ink)' },
+  Paid: { background: 'var(--blue-tint)', color: 'var(--brand)' },
+} as const;
 const striped = 'repeating-linear-gradient(135deg, #009CDE 0 3px, #BFE6F7 3px 6px)';
 
 /** A group trip still waiting for its second member opens on the invite step, not the workspace. */
@@ -162,7 +167,7 @@ export function Home() {
                   </span>
                   <span className="col" style={{ alignItems: 'flex-end', gap: 3 }}>
                     <span className="mono" style={{ fontSize: 15 }}>{money(x.amount, x.trip.currency)}</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 5, ...(x.status === 'captured' || x.status === 'logged' ? { background: 'var(--blue-tint)', color: 'var(--brand)' } : { background: 'var(--orange-tint)', color: 'var(--orange-ink)' }) }}>{x.status}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 5, ...STAGE_STYLE[payStage(x.status)] }}>{payStage(x.status)}</span>
                   </span>
                 </a>
               ))}
