@@ -8,8 +8,8 @@ import { Icon, icons, PayShare, PreviewCard } from './ui';
 type Row = { id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
 type GridCtx = { pay: (r: Row) => void };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
-const KIND = { stay: 'Stay', dining: 'Dining', store: 'In-store', shop: 'Online' } as const;
-const PAID: Record<Share['status'], string> = { none: '—', created: 'Ready to pay', approved: 'Approved · capturing', captured: 'Paid', failed: 'Payment failed' };
+const KIND = { stay: 'Prepaid', dining: 'Prepaid', store: 'In-store', shop: 'Online' } as const;
+const PAID: Record<Share['status'], string> = { none: '—', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
 const payable = (r: Row) => r.isMe && !!r.orderId && (r.status === PAID.created || r.status === PAID.failed);
 
 /** Spending tab, top: bills still being split. Once everyone on a bill accepts, it moves to Bills and payments. */
@@ -36,6 +36,8 @@ export function SplitBills({ ctx }: { ctx: Ctx }) {
 const status = (p: Preview, s: Share) => (p.frozen ? PAID[s.status] : 'Accepted · waiting for the others');
 
 function PayCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCtx>) {
+  if (data?.isMe && data.status === PAID.captured)
+    return <button type="button" className="btn btn-on" style={{ minHeight: 36 }} disabled><Icon d={icons.check} />Paid</button>;
   if (!data || !payable(data)) return null;
   return <button type="button" className="btn btn-primary" style={{ minHeight: 36 }} onClick={() => context.pay(data)}>Pay</button>;
 }
@@ -45,6 +47,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const { trip, me } = ctx;
   const [paying, setPaying] = useState<Row | null>(null);
   const [adding, setAdding] = useState(false);
+  const [paidMsg, setPaidMsg] = useState<string | null>(null);
 
   const rows = useMemo<Row[]>(() => trip.previews.flatMap((p) => {
     const cents = shareAmounts(p);
@@ -67,6 +70,11 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []);
   const context = useMemo<GridCtx>(() => ({ pay: setPaying }), []);
   const mine = rows.filter((r) => r.isMe && payable(r));
+  // PayPal's webhook marks the share captured (seen on the next 2 s poll): close the panel and say so.
+  if (paying && rows.find((r) => r.id === paying.id)?.status === PAID.captured) { // state adjusted during render, per React docs
+    setPaidMsg(`Payment successful: your share of ${paying.bill} is paid.`);
+    setPaying(null);
+  }
 
   return (
     <section aria-labelledby="bills-h" className="card">
@@ -77,6 +85,12 @@ export function Bills({ ctx }: { ctx: Ctx }) {
         </div>
         <button type="button" className={`btn ${adding ? 'btn-on' : ''}`} aria-expanded={adding} onClick={() => setAdding((v) => !v)}><Icon d={icons.plus} />Pay at a store</button>
       </div>
+      {paidMsg && (
+        <p role="status" className="row small" style={{ gap: 8, margin: 0, background: 'var(--blue-tint)', color: 'var(--brand)', padding: '10px 14px', borderRadius: 10, justifyContent: 'space-between' }}>
+          <span className="row" style={{ gap: 6 }}><Icon d={icons.check} />{paidMsg}</span>
+          <button type="button" className="btn" style={{ minHeight: 32 }} onClick={() => setPaidMsg(null)}>Dismiss</button>
+        </p>
+      )}
       {adding && <StoreBill ctx={ctx} onDone={() => setAdding(false)} />}
       {rows.length ? (
         <AgGridReact<Row> theme={theme} rowData={rows} columnDefs={columnDefs} defaultColDef={defaultColDef} getRowId={(p) => p.data.id}

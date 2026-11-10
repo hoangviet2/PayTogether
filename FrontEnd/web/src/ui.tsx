@@ -218,7 +218,7 @@ export function Chat({ ctx }: { ctx: Ctx }) {
   );
 }
 
-const STATUS: Record<Share['status'], string> = { none: '', created: 'Awaiting payment', approved: 'Approved · capturing', captured: 'Paid', failed: 'Payment failed' };
+const STATUS: Record<Share['status'], string> = { none: '', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
 
 /** Price preview with split bars. Each member moves only their own bar; ratios must reach exactly 100% (ai.md §2.4). */
 export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
@@ -291,13 +291,16 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
 declare global {
   interface Window { paypal?: { Buttons: (o: object) => { render: (el: HTMLElement) => Promise<void>; close: () => Promise<void> } } }
 }
-const scripts = new Map<string, Promise<void>>();
+// One PayPal SDK at a time: a store bill needs the store as merchant-id, so a different src replaces the loaded one.
+let sdk: { src: string; ready: Promise<void>; el: HTMLScriptElement } | null = null;
 const loadScript = (src: string) => {
-  if (!scripts.has(src)) scripts.set(src, new Promise((ok, fail) => {
-    const s = Object.assign(document.createElement('script'), { src, onload: () => ok(), onerror: () => fail(new Error('PayPal SDK failed to load')) });
-    document.head.append(s);
-  }));
-  return scripts.get(src)!;
+  if (sdk?.src === src) return sdk.ready;
+  if (sdk) { sdk.el.remove(); delete window.paypal; }
+  const el = document.createElement('script');
+  const ready = new Promise<void>((ok, fail) => Object.assign(el, { src, onload: () => ok(), onerror: () => fail(new Error('PayPal SDK failed to load')) }));
+  document.head.append(el);
+  sdk = { src, ready, el };
+  return ready;
 };
 
 /** PayPal buttons for this member's existing order. Approval here is optimistic; the webhook sets the real status. */
@@ -306,12 +309,19 @@ export function PayShare({ ctx, previewId, orderId, label, currency, autoOpen }:
   const box = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<'idle' | 'open' | 'approved' | 'error'>(autoOpen ? 'open' : 'idle');
   const [msg, setMsg] = useState('');
+  const payee = ctx.trip.previews.find((p) => p.id === previewId)?.payee?.email;
   useEffect(() => {
     if (state !== 'open' || !cfg?.paypalClientId || !box.current) return;
     let btns: ReturnType<NonNullable<Window['paypal']>['Buttons']> | null = null;
-    loadScript(`https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.paypalClientId)}&currency=${currency}&intent=capture`).then(() => {
+    let live = true;
+    // The order must name the same merchant as the SDK, or PayPal shows "Things don't appear to be working".
+    const src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.paypalClientId)}&currency=${currency}&intent=capture${payee ? `&merchant-id=${encodeURIComponent(payee)}` : ''}`;
+    // Ask the server for a payable order first: it replaces one PayPal has expired, and captures one already approved.
+    Promise.all([api<{ orderId: string; approved: boolean }>(`/trips/${ctx.trip.id}/previews/${previewId}/pay`, { body: {} }), loadScript(src)]).then(([r]) => {
+      if (!live) return;
+      if (r.approved) return setState('approved');
       btns = window.paypal!.Buttons({
-        createOrder: () => orderId,
+        createOrder: () => r.orderId,
         onApprove: () => api(`/trips/${ctx.trip.id}/previews/${previewId}/capture`, { body: {} })
           .then(() => setState('approved'))
           .catch((e) => { setState('error'); setMsg(e.message); }),
@@ -319,8 +329,8 @@ export function PayShare({ ctx, previewId, orderId, label, currency, autoOpen }:
       });
       return btns.render(box.current!);
     }).catch((e) => { setState('error'); setMsg(e.message); });
-    return () => { btns?.close(); };
-  }, [state, cfg, orderId, currency, previewId, ctx.trip.id]);
+    return () => { live = false; btns?.close(); };
+  }, [state, cfg, orderId, currency, previewId, ctx.trip.id, payee]);
 
   if (cfg && !cfg.paypalClientId) return <span className="small" style={{ color: 'var(--orange-ink)' }}>PayPal isn’t configured on the server.</span>;
   if (state === 'approved') return <span className="btn btn-on"><Icon d={icons.check} />Approved — waiting for PayPal to confirm</span>;

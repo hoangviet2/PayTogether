@@ -17,6 +17,7 @@ const newCode = (): string => {
 for (const t of trips.values()) {
   t.code ??= newCode(); // trips saved before join codes existed
   t.busy = false; // a Wayfinder turn cut off by a restart must not leave the chat stuck on "thinking"
+  recolor(t); // trips saved with the old palette
 }
 // Everyone who has logged in, so a trip owner can invite an account by its PayPal email. Kept beside the trips file.
 const USERS_FILE = FILE.replace(/(\.json)?$/, '.users.json');
@@ -28,6 +29,8 @@ export const save = () => {
 };
 export const remember = (user: string, name: string, email: string | null) => users.set(user, { name, email });
 const id = () => randomUUID().slice(0, 8);
+/** Colors follow seat position, so the seats stay distinct after someone leaves and the next joiner never repeats a color. */
+function recolor(t: Trip) { t.members.forEach((m, i) => Object.assign(m, PALETTE[i])); }
 const now = () => new Date().toISOString();
 export class Rejected extends Error {}
 const reject = (msg: string): never => { throw new Rejected(msg); };
@@ -102,6 +105,7 @@ export function leave(t: Trip, m: number) {
   }
   t.chat = t.chat.filter((c) => c.from !== m).map((c) => (typeof c.from === 'number' ? { ...c, from: shift(c.from) } : c));
   t.members.splice(m, 1);
+  recolor(t);
   say(t, 'ai', `${name} left the trip.`);
 }
 

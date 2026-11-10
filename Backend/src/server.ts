@@ -224,6 +224,26 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       } else if (e === 'equal' && is('POST', 6)) store.resetEqual(t, d, m);
       else if (e === 'accept' && is('POST', 6)) {
         if (store.accept(t, d, m)) await sendOrders(t, d);
+      } else if (e === 'pay' && is('POST', 6)) {
+        // Called each time someone opens PayPal: bills can sit for days and PayPal drops unapproved orders, so swap in a fresh one.
+        const p = t.previews.find((x) => x.id === d);
+        const share = p?.shares[m];
+        if (!p || !share?.order_id) throw new HttpError(400, 'No payment request for you on this bill.');
+        if (share.status === 'captured') throw new HttpError(409, 'You already paid this.');
+        const st = await ext.orderStatus(share.order_id);
+        if (st === 'APPROVED') { await ext.captureOrder(share.order_id); return send({ orderId: share.order_id, approved: true }); }
+        if (st === 'COMPLETED') throw new HttpError(409, 'PayPal already has this payment; it will show as Paid shortly.');
+        if (!st || st === 'VOIDED') {
+          share.order_id = await ext.createOrder({
+            requestId: `${p.id}-${m}-${Date.now()}`, customId: `${t.id}:${p.id}:${m}`, cents: shareAmounts(p)![m], currency: p.currency,
+            description: `${t.name} · ${p.title} · ${t.members[m].name}'s share`, ...(p.payee && { payee: p.payee.email }),
+          });
+          share.status = 'created';
+          const row = t.txs.find((x) => x.id === `${p.id}-${m}`);
+          if (row) row.status = 'created';
+          persist();
+        }
+        return send({ orderId: share.order_id, approved: false });
       } else if (e === 'capture' && is('POST', 6)) {
         const p = t.previews.find((x) => x.id === d);
         const share = p?.shares[m];

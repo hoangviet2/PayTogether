@@ -269,12 +269,17 @@ export function tripStatus(t: Pick<Trip, 'phase' | 'window'>, today = new Date()
 
 export type Person = { name: string; symbol: string; color: string; tint: string; user?: string }; // user: PayPal id once they log in
 /** Color + symbol per member slot, never color alone (invariant 10). */
+// Seat colors, ordered so the first members get the most distinct hues (blue / red / green / purple), never two
+// look-alikes such as red-orange or red-pink side by side.
 export const PALETTE: Omit<Person, 'name' | 'user'>[] = [
-  ...members.map(({ symbol, color, tint }) => ({ symbol, color, tint })),
-  { symbol: '■', color: '#1D4ED8', tint: '#DBE7FB' },
-  { symbol: '◗', color: '#0F766E', tint: '#D5F0EC' },
-  { symbol: '✚', color: '#B91C1C', tint: '#F9DEDE' },
-  { symbol: '⬟', color: '#4D7C0F', tint: '#E4F0D3' },
+  { symbol: '■', color: '#1D4ED8', tint: '#DBE7FB' }, // blue
+  { symbol: '▲', color: '#B91C1C', tint: '#F9DEDE' }, // red
+  { symbol: '●', color: '#15803D', tint: '#DCF0E1' }, // green
+  { symbol: '★', color: '#7E22CE', tint: '#EEDFF9' }, // purple
+  { symbol: '⬟', color: '#A16207', tint: '#F5EBCF' }, // gold
+  { symbol: '◗', color: '#0E7490', tint: '#D3EEF4' }, // cyan
+  { symbol: '◆', color: '#BE185D', tint: '#FCE7F3' }, // pink
+  { symbol: '✚', color: '#374151', tint: '#E5E7EB' }, // slate
 ];
 export type Transport = 'flight' | 'train' | 'drive' | 'ferry' | 'none';
 export type Leg = { id: string; destination: { name: string; country: string }; nights: number; arrive_date: string; depart_date: string; transport_hint?: Transport };

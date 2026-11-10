@@ -107,7 +107,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
 }
 
 const ORDER_STATUS: Record<Share['status'], [string, string]> = {
-  none: ['Not paid', 'pill-gray'], created: ['Awaiting payment', 'pill-orange'], approved: ['Capturing', 'pill-blue'], captured: ['Paid', 'pill-blue'], failed: ['Payment failed', 'pill-orange'],
+  none: ['Not paid', 'pill-gray'], created: ['Awaiting payment', 'pill-orange'], approved: ['Verifying', 'pill-gray'], captured: ['Paid', 'pill-blue'], failed: ['Payment failed', 'pill-orange'],
 };
 
 /** Order summary of everything the group bought online, laid out like a store's checkout summary. */

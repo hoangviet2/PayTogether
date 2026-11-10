@@ -106,6 +106,16 @@ export async function createOrder(o: { requestId: string; customId: string; cent
   return d.id as string;
 }
 
+/** Order status, or null when PayPal no longer has it (unapproved orders expire). */
+export async function orderStatus(orderId: string): Promise<string | null> {
+  need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');
+  const r = await fetch(`${PP}/v2/checkout/orders/${encodeURIComponent(orderId)}`, { headers: { Authorization: `Bearer ${await ppToken()}` } });
+  if (r.status === 404) return null;
+  const d = (await r.json()) as Record<string, any>;
+  if (!r.ok) throw new Error(`PayPal order lookup ${r.status}: ${d.message ?? d.name ?? 'error'}`);
+  return d.status as string;
+}
+
 /** Runs after the payer approved in PayPal. Does not change our status; the webhook does (invariant 3). */
 export async function captureOrder(orderId: string) {
   need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');
