@@ -86,3 +86,10 @@ test('join by code: owner is member 0, joining twice keeps one seat, closed once
   assert.equal(s.publicState(t).code, undefined);
   assert.ok(s.publicState(t).members.every((m) => !('user' in m)));
 });
+
+test('solo trip refuses joins; dates must run forward', () => {
+  const t = s.createTrip('Me', 'USD', ['Ana'], 'pp-ana', { solo: true, window: { start: '2027-05-14', end: '2027-05-17' } });
+  assert.equal(s.join(t, 'Ana', 'pp-ana'), 0); // the owner re-joining is still fine
+  assert.throws(() => s.join(t, 'Ben', 'pp-ben'), s.Rejected);
+  assert.throws(() => s.createTrip('Bad', 'USD', ['Ana'], 'pp-ana', { window: { start: '2027-05-17', end: '2027-05-14' } }), s.Rejected);
+});

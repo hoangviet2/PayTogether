@@ -1,16 +1,17 @@
-// PayTogether API on node:http. The web app reaches it through Vite's /api proxy (FrontEnd/web/vite.config.ts).
+// PayTogether API on node:http, API only. The web app is deployed on its own and calls this server cross-origin
+// (VITE_API_URL), or through Vite's /api proxy in dev (FrontEnd/web/vite.config.ts).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { extname, normalize } from 'node:path';
 import { z } from 'zod';
-import { searchTxns, shareAmounts, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
+import { mySummary, searchTxns, shareAmounts, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
 import * as store from './store.ts';
 import * as ext from './integrations.ts';
 import { runTurn, shouldReply } from './wayfinder.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN; // set on any public host; the web dev proxy sends it (FrontEnd/web/vite.config.ts)
+// The web app's origin(s), comma-separated, e.g. https://paytogether-web.onrender.com. Unset: no cross-origin access.
+const WEB_ORIGINS = (process.env.WEB_ORIGIN ?? '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
 const seenEvents = new Set<string>(); // shortcut: in-memory webhook dedupe; persist it with the store when moving to Postgres
 
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -96,13 +97,19 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 
   if (a === 'trips' && is('GET', 2)) {
     const { user } = session(req);
-    return send([...store.trips.values()].filter((t) => store.memberOf(t, user) >= 0).map((t) => ({ id: t.id, name: t.name, phase: t.phase, members: t.members, destinations: t.destinations, window: t.window })));
+    return send([...store.trips.values()].flatMap((t) => {
+      const m = store.memberOf(t, user);
+      return m < 0 ? [] : [{ id: t.id, name: t.name, phase: t.phase, currency: t.currency, solo: !!t.solo, members: t.members, destinations: t.destinations, window: t.window, mine: mySummary(t, m) }];
+    }));
   }
 
   if (a === 'trips' && is('POST', 2)) {
     const u = session(req);
-    const i = await body(req, z.object({ name, currency: z.enum(['USD', 'EUR', 'GBP']) }));
-    return send(store.createTrip(i.name, i.currency, [u.name], u.user), 201); // friends join with the trip's code
+    const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    const i = await body(req, z.object({ name, currency: z.enum(['USD', 'EUR', 'GBP']), solo: z.boolean().default(false), start: date.optional(), end: date.optional() }));
+    if (!i.start !== !i.end) throw new HttpError(400, 'Give both a start and an end date, or neither.');
+    const window = i.start && i.end ? { start: i.start, end: i.end } : null;
+    return send(store.createTrip(i.name, i.currency, [u.name], u.user, { solo: i.solo, window }), 201); // friends join with the trip's code
   }
 
   if (a === 'trips' && b) {
@@ -219,25 +226,16 @@ async function sendOrders(t: Trip, previewId: string) {
   store.say(t, 'ai', 'Each of you has a payment request for your share — tap Pay my share.');
 }
 
-// The built web app (FrontEnd/web/dist), so one Render URL serves both the page and /api.
-const WEB = new URL('../../FrontEnd/web/dist/', import.meta.url).pathname;
-const TYPES: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
-async function web(req: IncomingMessage, res: ServerResponse) {
-  try {
-    // Inside try: decodeURIComponent throws on a bad escape (/%E0), which would otherwise crash the server.
-    const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
-    const file = path === '/' || !extname(path) ? 'index.html' : path.slice(1); // hash routes always load index.html
-    const data = await readFile(WEB + file);
-    res.writeHead(200, { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream', 'Cache-Control': file.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache' });
-    res.end(data);
-  } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found (build the web app: cd FrontEnd/web && npm run build)');
-  }
-}
-
 createServer((req, res) => {
-  if (!req.url?.startsWith('/api')) return void web(req, res);
+  const origin = String(req.headers.origin ?? '');
+  if (WEB_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-session, x-access-token');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  }
+  if (req.method === 'OPTIONS') return void res.writeHead(204).end();
+  if (!req.url?.startsWith('/api')) return void res.writeHead(404, { 'Content-Type': 'text/plain' }).end('PayTogether API: routes are under /api');
   route(req, res).catch((err) => {
     const status = err instanceof HttpError ? err.status : err instanceof store.Rejected ? 409 : err instanceof ext.NotConfigured ? 503 : err instanceof SyntaxError ? 400 : 500;
     if (status === 500) console.error(err);
@@ -246,4 +244,4 @@ createServer((req, res) => {
       res.end(JSON.stringify({ error: status === 500 ? 'Server error' : err.message }));
     }
   });
-}).listen(PORT, () => console.log(`PayTogether API on port ${PORT} · token ${ACCESS_TOKEN ? 'required' : 'off'} · ready:`, ext.ready));
+}).listen(PORT, () => console.log(`PayTogether API on port ${PORT} · token ${ACCESS_TOKEN ? 'required' : 'off'} · web origins ${WEB_ORIGINS.join(', ') || 'none (dev proxy only)'} · ready:`, ext.ready));

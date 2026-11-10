@@ -289,7 +289,7 @@ export type Trip = {
   id: string; name: string; currency: string; phase: Phase; members: Person[]; code: string; // code: what friends type to join
   window: { start: string; end: string } | null; budget_per_person_cents?: number;
   destinations: string[]; legs: Leg[]; polls: Poll[]; previews: Preview[]; chat: LiveMsg[]; txs: Txn[];
-  confirms: number[]; busy: boolean;
+  confirms: number[]; busy: boolean; solo?: boolean; // solo: one traveler, join code closed
 };
 
 export const money = (cents: number, currency: string) =>
@@ -385,6 +385,26 @@ export function summarizeTrip(t: Trip) {
     byMember: t.members.map((_, i) => sum((x) => x.member === i && x.status !== 'failed')),
     byType: [...new Set(t.txs.map((x) => x.type))].map((type) => ({ type, amount: sum((x) => x.type === type && x.status !== 'failed') })),
     byLeg: t.legs.map((l) => ({ name: l.destination.name, perMember: t.members.map((_, i) => sum((x) => x.member === i && x.leg === l.destination.name && x.status !== 'failed')) })),
+  };
+}
+
+/** One member's slice of a trip for the home page: what they spent, what's waiting on them. */
+export function mySummary(t: Trip, m: number) {
+  const mine = t.txs.filter((x) => x.member === m);
+  const sum = (f: (x: Txn) => boolean) => mine.filter(f).reduce((a, x) => a + x.amount, 0);
+  const todos = t.previews.flatMap((p) => {
+    const s = p.shares[m];
+    if (!s || s.status === 'captured') return [];
+    const cents = shareAmounts(p)?.[m] ?? null;
+    if (!p.frozen) return s.accepted ? [] : [{ title: p.title, cents, cta: 'Open split' }];
+    return s.status === 'created' ? [{ title: p.title, cents, cta: 'Pay my share' }] : [];
+  });
+  return {
+    spent: sum((x) => x.status === 'captured' || x.status === 'logged'),
+    pending: sum((x) => x.status === 'approved' || x.status === 'created'),
+    byType: [...new Set(mine.map((x) => x.type))].map((type) => ({ type, amount: sum((x) => x.type === type && x.status !== 'failed') })),
+    recent: mine.filter((x) => x.status !== 'failed').sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 5),
+    todos,
   };
 }
 

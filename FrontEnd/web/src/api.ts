@@ -3,14 +3,18 @@ import type { Trip } from '../../shared/trip';
 
 export type Config = { paypalClientId: string | null; paypalLogin: string | null; ready: Record<string, boolean> };
 
-/** Calls the Backend through Vite's /api proxy. Throws the server's error message. */
+// The Backend's address when it runs on its own host (VITE_API_URL at build time, e.g. https://paytogether-api.onrender.com).
+// Empty in dev: requests stay same-origin and Vite proxies /api.
+const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
+/** Calls the Backend. Throws the server's error message. */
 export async function api<T>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
   const s = getSession();
-  const r = await fetch(`/api${path}`, {
+  const r = await fetch(`${API_URL}/api${path}`, {
     method: opts.method ?? (opts.body === undefined ? 'GET' : 'POST'),
     headers: { 'Content-Type': 'application/json', ...(s && { 'x-session': s.session }) },
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-  });
+  }).catch(() => { throw new Error('Can’t reach the API server. Check VITE_API_URL and the server’s WEB_ORIGIN.'); });
   const d = await r.json().catch(() => ({ error: r.status === 502 || r.status === 504 ? 'The API server is not running (cd Backend && npm run dev).' : `HTTP ${r.status}` }));
   if (r.status === 401 && s && path !== '/auth/paypal') { setSession(null); location.hash = '#/'; } // expired or server secret changed
   if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
@@ -44,7 +48,7 @@ export async function finishLogin(): Promise<void> {
   if (!code && !q.get('error')) return;
   const saved = JSON.parse(sessionStorage.getItem('pt-login') ?? '{}') as { state?: string; after?: string };
   sessionStorage.removeItem('pt-login');
-  history.replaceState(null, '', returnUrl() + (saved.after && saved.after !== '#/' ? saved.after : '#/trips'));
+  history.replaceState(null, '', returnUrl() + (saved.after && saved.after !== '#/' ? saved.after : '#/home'));
   if (!code) throw new Error('PayPal login was cancelled.');
   if (q.get('state') !== saved.state) throw new Error('Login did not match this browser. Try again.');
   setSession(await api<Session>('/auth/paypal', { body: { code } }));

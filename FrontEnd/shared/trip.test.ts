@@ -86,3 +86,24 @@ test('live model: timeline validation, redate, split amounts, settlement', async
   tx.forEach((t: { from: number; to: number; amount: number }) => { after[t.from] += t.amount; after[t.to] -= t.amount; });
   assert.deepEqual(after, [0, 0, 0, 0]);
 });
+
+test('mySummary: only my rows, pending vs spent, todos for unaccepted and unpaid shares', async () => {
+  const m = await import('./trip.ts');
+  const row = (member: number, amount: number, status: string, date = '2027-05-14') => ({ id: `${member}${status}${amount}`, member, paid_by: member, date, time: '10:00', vendor: 'V', type: 'Hotel', leg: 'L', amount, total: amount, shareBp: 5000, source: 'Logged', status });
+  const share = (member: number, accepted: boolean, status = 'none') => ({ member, ratio_bp: 5000, accepted, status });
+  const t = {
+    txs: [row(0, 1000, 'captured'), row(0, 500, 'logged', '2027-05-15'), row(0, 300, 'created'), row(0, 99, 'failed'), row(1, 7000, 'captured')],
+    previews: [
+      { id: 'a', title: 'Open', total_cents: 2000, frozen: false, shares: [share(0, false), share(1, true)] },
+      { id: 'b', title: 'Unpaid', total_cents: 2000, frozen: true, shares: [share(0, true, 'created'), share(1, true, 'created')] },
+      { id: 'c', title: 'Paid', total_cents: 2000, frozen: true, shares: [share(0, true, 'captured'), share(1, true, 'captured')] },
+    ],
+  } as never;
+  const s = m.mySummary(t, 0);
+  assert.equal(s.spent, 1500);
+  assert.equal(s.pending, 300);
+  assert.deepEqual(s.byType, [{ type: 'Hotel', amount: 1800 }]);
+  assert.equal(s.recent[0].date, '2027-05-15');
+  assert.deepEqual(s.todos.map((x: { cta: string; cents: number | null }) => [x.cta, x.cents]), [['Open split', 1000], ['Pay my share', 1000]]);
+  assert.equal(m.mySummary(t, 2).spent, 0); // a seat with nothing is all zero
+});

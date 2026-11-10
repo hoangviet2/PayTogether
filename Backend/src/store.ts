@@ -26,12 +26,13 @@ const reject = (msg: string): never => { throw new Rejected(msg); };
 export const OPENING =
   "Hi everyone 👋 I'm Wayfinder. Where do you want to go? Drop cities, regions, or even a vibe (\"somewhere warm with good food\") — plus rough dates and budget if you have them.";
 
-/** `user` is the creator's PayPal id; they become member 0. */
-export function createTrip(name: string, currency: string, names: string[], user?: string): Trip {
+/** `user` is the creator's PayPal id; they become member 0. A solo trip never takes another member. */
+export function createTrip(name: string, currency: string, names: string[], user?: string, opts: { solo?: boolean; window?: Trip['window'] } = {}): Trip {
+  if (opts.window && !(opts.window.end > opts.window.start)) reject('End date must be after the start date.');
   const t: Trip = {
-    id: id(), name, currency, phase: 'DESTINATIONS', code: newCode(),
+    id: id(), name, currency, phase: 'DESTINATIONS', code: newCode(), ...(opts.solo && { solo: true }),
     members: names.map((n, i) => ({ name: n, ...PALETTE[i], ...(i === 0 && user && { user }) })),
-    window: null, destinations: [], legs: [], polls: [], previews: [], txs: [], confirms: [], busy: false,
+    window: opts.window ?? null, destinations: [], legs: [], polls: [], previews: [], txs: [], confirms: [], busy: false,
     chat: [{ from: 'ai', at: now(), text: OPENING }],
   };
   trips.set(t.id, t);
@@ -46,6 +47,7 @@ export const memberOf = (t: Trip, user: string) => t.members.findIndex((m) => m.
 export function join(t: Trip, name: string, user: string): number {
   const seat = memberOf(t, user);
   if (seat >= 0) return seat;
+  if (t.solo) reject('This is a solo trip, so nobody else can join it.');
   if (PHASES.indexOf(t.phase) >= PHASES.indexOf('PRICING')) reject('This trip is already splitting prices, so new members can no longer join.');
   if (t.members.length >= PALETTE.length) reject(`A trip can have at most ${PALETTE.length} members.`);
   t.members.push({ name, ...PALETTE[t.members.length], user });
