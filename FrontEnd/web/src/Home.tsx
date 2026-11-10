@@ -193,7 +193,7 @@ export function Home() {
                 <div key={k} className="col" style={{ gap: 8, padding: 12, borderRadius: 12, background: x.cta === 'Pay my share' ? 'var(--orange-tint)' : 'var(--blue-tint)' }}>
                   <span className="between" style={{ fontSize: 14 }}><strong>{x.title}</strong><span className="mono">{x.cents == null ? '—' : money(x.cents, x.trip.currency)}</span></span>
                   <span className="small muted">{x.trip.name}</span>
-                  <a href={`#/trip/${x.trip.id}/plan`} className="btn btn-primary">{x.cta}</a>
+                  <a href={`#/trip/${x.trip.id}/spending`} className="btn btn-primary">{x.cta}</a>
                 </div>
               ))}
             </section>

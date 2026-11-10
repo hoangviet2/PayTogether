@@ -9,12 +9,8 @@ const short = (iso: string) => `${weekday(iso)} ${Number(iso.slice(8))}`;
 const legOn = (t: Trip, d: string) => t.legs.find((l) => d >= l.arrive_date && d < l.depart_date)?.destination.name ?? null;
 
 const isPayment = (t: Txn) => t.source !== 'On-trip log';
-const evtStyle = (t: Txn, c: string, tint: string) => {
-  if (!isPayment(t)) return { background: '#fff', borderColor: c, color: c };
-  const stage = payStage(t.status);
-  if (stage === 'Paid') return { background: tint, borderColor: c, color: '#012169' };
-  return { background: '#fff', borderColor: c, borderStyle: stage === 'Verifying' ? 'dotted' : 'dashed', color: '#012169' };
-};
+// Same solid border for every block, however it was added; only the fill and the label show the payment status.
+const evtStyle = (t: Txn, c: string, tint: string) => ({ background: payStage(t.status) === 'Paid' ? tint : '#fff', borderColor: c, color: '#012169' });
 
 export function Schedule({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
@@ -36,7 +32,7 @@ export function Schedule({ ctx }: { ctx: Ctx }) {
         </div>
       </div>
       <Timeline ctx={ctx} days={days} onLog={openLog} />
-      <LogExpense ref={dlg} ctx={ctx} day={logDay} onDone={() => dlg.current?.close()} />
+      <LogExpense ref={dlg} ctx={ctx} day={logDay} days={days} onDone={() => dlg.current?.close()} />
     </section>
   );
 }
@@ -77,8 +73,8 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
                   onLog(days[Math.min(days.length - 1, Math.floor(((e.clientX - r.left) / r.width) * days.length))]);
                 } : undefined}>
                 {trip.txs.filter((t) => t.member === i && t.status !== 'failed').map((t) => {
-                  const label = <>{t.vendor} · {money(t.amount, trip.currency)}{isPayment(t) && ` · ${payStage(t.status)}`}</>;
-                  const props = { className: 'evt', style: { ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }, title: `${t.vendor} · ${money(t.amount, trip.currency)}${isPayment(t) ? ` · ${payStage(t.status)}` : ' · logged expense'}` };
+                  const label = <>{t.vendor} · {money(t.amount, trip.currency)} · {payStage(t.status)}</>;
+                  const props = { className: 'evt', style: { ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }, title: `${t.vendor} · ${money(t.amount, trip.currency)} · ${payStage(t.status)}${isPayment(t) ? '' : ' · logged expense'}` };
                   // Payments (stays, in-store bills) open in Spending, where they're paid and tracked.
                   return isPayment(t)
                     ? <a key={t.id} {...props} href={`#/trip/${trip.id}/spending`} style={{ ...props.style, textDecoration: 'none' }} title={`${props.title} · open in Spending`}>{label}</a>
@@ -90,31 +86,35 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
         </div>
       </div>
       <div className="row small muted" style={{ flexWrap: 'wrap', gap: 16 }}>
-        <span>Payments: dashed = awaiting payment · dotted = verifying with PayPal · solid fill = paid. Plain outline: logged expense. Click a payment to open it in Spending.</span>
+        <span>Filled = paid · white = awaiting payment or verifying (the label says which). Click a payment to open it in Spending.</span>
         <span>Other members’ rows are read-only.</span>
       </div>
     </>
   );
 }
 
-function LogExpense({ ref, ctx, day, onDone }: { ref: Ref<HTMLDialogElement>; ctx: Ctx; day: string; onDone: () => void }) {
+function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElement>; ctx: Ctx; day: string; days: string[]; onDone: () => void }) {
   const { trip, me, act } = ctx;
   const [amount, setAmount] = useState('');
-  const [mode, setMode] = useState<'me' | 'equal'>('equal');
-  const [picked, setPicked] = useState<number[]>(trip.members.map((_, i) => i));
+  const [date, setDate] = useState(day);
+  const [seenDay, setSeenDay] = useState(day);
+  if (day !== seenDay) { setSeenDay(day); setDate(day); } // a double-click on another day opens the dialog on that day
+  const [paid, setPaid] = useState(true);
+  const [pcts, setPcts] = useState(() => equalBps(trip.members.length).map((b) => String(b / 100)));
   const cents = Math.round(parseFloat(amount) * 100);
   const valid = Number.isFinite(cents) && cents > 0;
-  const who = mode === 'me' ? [me] : picked;
-  const shares = valid && who.length ? largestRemainder(cents, who.map(() => 1)) : [];
+  const bps = trip.solo ? trip.members.map((_, i) => (i === me ? 10000 : 0)) : pcts.map((v) => Math.round((parseFloat(v) || 0) * 100));
+  const sum = bps.reduce((a, b) => a + b, 0);
+  const shares = valid && sum === 10000 ? largestRemainder(cents, bps) : null;
+  const setAll = (f: (i: number) => string) => setPcts(trip.members.map((_, i) => f(i)));
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!valid || !who.length) return;
-    const f = new FormData(e.currentTarget);
-    const eq = equalBps(who.length);
-    const bps = trip.members.map((_, i) => (who.includes(i) ? eq[who.indexOf(i)] : 0));
-    await act('/txns', { date: day, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, bps });
-    e.currentTarget.reset();
+    if (!valid || sum !== 10000) return;
+    const form = e.currentTarget;
+    const f = new FormData(form);
+    await act('/txns', { date, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, bps, paid });
+    form.reset();
     setAmount('');
     onDone();
   };
@@ -124,40 +124,47 @@ function LogExpense({ ref, ctx, day, onDone }: { ref: Ref<HTMLDialogElement>; ct
       <form onSubmit={submit} className="col" style={{ gap: 14 }}>
         <div className="col">
           <h2 id="log-h" style={{ fontSize: 20 }}>Log expense</h2>
-          <span className="small muted">{day && `${short(day)} · ${legOn(trip, day) ?? ''}`}</span>
+          <span className="small muted">{date && `${short(date)} · ${legOn(trip, date) ?? ''}`}</span>
+        </div>
+        <div role="group" aria-label="Has it been paid?" className="seg" style={{ alignSelf: 'flex-start' }}>
+          <button type="button" aria-pressed={paid} onClick={() => setPaid(true)}>Already paid</button>
+          <button type="button" aria-pressed={!paid} onClick={() => setPaid(false)}>Just planned</button>
         </div>
         <label className="field">Vendor<input name="vendor" required maxLength={60} /></label>
-        <div className="row" style={{ alignItems: 'flex-end' }}>
-          <label className="field" style={{ flex: 1 }}>Type
-            <select name="type">{['Restaurant', 'Hotel', 'Store', 'Transport', 'Other'].map((t) => <option key={t}>{t}</option>)}</select>
-          </label>
-          <label className="field" style={{ flex: 1 }}>Amount ({trip.currency})<input name="amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} pattern="\d+(\.\d{1,2})?" /></label>
+        <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label className="field" style={{ flex: '1 1 140px' }}>Date<input type="date" required value={date} min={days[0]} max={days.at(-1)} onChange={(e) => setDate(e.target.value)} /></label>
           <label className="field" style={{ width: 110 }}>Time<input name="time" type="time" defaultValue="20:00" /></label>
         </div>
-        <div className="field">Who paid<span className="row" style={{ fontWeight: 400, fontSize: 15, color: 'var(--ink)' }}><Chip p={trip.members[me]} size={24} />{trip.members[me].name} (you)</span></div>
+        <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label className="field" style={{ flex: '1 1 140px' }}>Type
+            <select name="type">{['Restaurant', 'Hotel', 'Store', 'Transport', 'Tickets', 'Other'].map((t) => <option key={t}>{t}</option>)}</select>
+          </label>
+          <label className="field" style={{ flex: '1 1 140px' }}>Amount ({trip.currency})<input name="amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} pattern="\d+(\.\d{1,2})?" /></label>
+        </div>
         {!trip.solo && <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
-          <legend className="field" style={{ marginBottom: 6 }}>Split with</legend>
-          <div role="group" className="seg" style={{ alignSelf: 'flex-start' }}>
-            <button type="button" aria-pressed={mode === 'me'} onClick={() => setMode('me')}>Me only</button>
-            <button type="button" aria-pressed={mode === 'equal'} onClick={() => setMode('equal')}>Equal among selected</button>
+          <legend className="field" style={{ marginBottom: 6 }}>Split (0% = not on it)</legend>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn" onClick={() => setAll((i) => (i === me ? '100' : '0'))}>Me 100%</button>
+            <button type="button" className="btn" onClick={() => { const eq = equalBps(trip.members.length); setAll((i) => String(eq[i] / 100)); }}>Equal</button>
           </div>
-          {mode === 'equal' && (
-            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-              {trip.members.map((m, i) => (
-                <label key={i} className="row" style={{ gap: 4, fontSize: 14, minHeight: 44 }}>
-                  <input type="checkbox" checked={picked.includes(i)} onChange={() => setPicked((p) => (p.includes(i) ? p.filter((x) => x !== i) : [...p, i].sort()))} />
-                  <span style={{ color: m.color }}>{m.symbol}</span>{m.name}
-                </label>
-              ))}
-            </div>
-          )}
-          <span className="small muted">
-            {who.length} selected{valid && who.length ? ` · ${money(shares[0], trip.currency)}${new Set(shares).size > 1 ? ' or less' : ''} each` : ''}. You paid; the others owe you their share (see Dashboard → settle up).
-          </span>
+          <div className="col" style={{ gap: 6 }}>
+            {trip.members.map((m, i) => (
+              <label key={i} className="row" style={{ gap: 8, fontSize: 14, minHeight: 44 }}>
+                <Chip p={m} size={24} /><span style={{ flex: 1 }}>{m.name}{i === me ? ' (you)' : ''}</span>
+                <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
+                  onChange={(e) => setPcts((p) => p.map((v, j) => (j === i ? e.target.value : v)))} />%
+                <span className="mono" style={{ minWidth: 80, textAlign: 'right' }}>{shares ? money(shares[i], trip.currency) : '—'}</span>
+              </label>
+            ))}
+          </div>
+          {sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {(sum / 100).toFixed(2)}%; they need to total 100%.</p>}
         </fieldset>}
+        <span className="small muted">{paid
+          ? 'You paid. It goes straight to Spending; the others owe you their share (see Dashboard → settle up).'
+          : `It goes to Split bills on Spending. ${trip.solo ? 'Accept it' : 'Everyone on it accepts (not needed if you take 100%)'}, then each pays their share in advance with PayPal.`}</span>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" onClick={onDone}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={!valid || !who.length}>Save expense</button>
+          <button type="submit" className="btn btn-primary" disabled={!valid || sum !== 10000}>{paid ? 'Save expense' : 'Add to bills'}</button>
         </div>
       </form>
     </dialog>

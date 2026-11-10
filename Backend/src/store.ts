@@ -344,7 +344,7 @@ export function ordersCreated(t: Trip, p: Preview, orderIds: string[]): Txn[] {
     if (!s.ratio_bp) return []; // a 0% share has nothing to pay
     Object.assign(s, { order_id: orderIds[i], status: 'created' });
     return [{
-      id: `${p.id}-${i}`, member: i, paid_by: i, date: leg?.arrive_date ?? now().slice(0, 10), time: p.payee ? now().slice(11, 16) : '15:00', vendor: p.title,
+      id: `${p.id}-${i}`, member: i, paid_by: i, date: p.date ?? leg?.arrive_date ?? now().slice(0, 10), time: p.time ?? (p.payee ? now().slice(11, 16) : '15:00'), vendor: p.title,
       type: p.kind === 'stay' ? 'Hotel' : p.category ?? 'Restaurant', leg: leg?.destination.name ?? '', amount: cents[i], total: p.total_cents,
       shareBp: s.ratio_bp, source: p.kind === 'shop' ? 'Online purchase' : p.payee ? 'In-store' : 'Prepaid share', status: 'created', nights: p.kind === 'stay' ? leg?.nights : undefined,
     }];
@@ -399,17 +399,32 @@ export function createStoreBill(t: Trip, m: number, b: { vendor: string; email: 
 }
 
 /** On-trip expense: one row per member share, all paid by the logger. */
-export function logExpense(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; bps: number[] }): Txn[] {
+/** store: paid at a store's counter (Spending → Paid at a store), shown with source In-store. */
+export function logExpense(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; bps: number[]; store?: boolean }): Txn[] {
   if (e.bps.length !== t.members.length || e.bps.reduce((a, b) => a + b, 0) !== 10000) reject('Split must cover every member and total 100%.');
   const cents = shareAmounts({ total_cents: e.total, shares: e.bps.map((ratio_bp) => ({ ratio_bp })) } as Preview)!;
   const leg = t.legs.find((l) => e.date >= l.arrive_date && e.date < l.depart_date) ?? t.legs.at(-1);
   const base = id();
   const rows = cents.flatMap((amount, i): Txn[] => (amount ? [{
     id: `${base}-${i}`, member: i, paid_by: m, date: e.date, time: e.time, vendor: e.vendor, type: e.type, leg: leg?.destination.name ?? '',
-    amount, total: e.total, shareBp: e.bps[i], source: 'On-trip log', status: 'logged',
+    amount, total: e.total, shareBp: e.bps[i], source: e.store ? 'In-store' : 'On-trip log', status: 'logged',
   }] : []));
   t.txs.push(...rows);
   return rows;
+}
+
+/** Planned expense from the schedule: not paid yet, so it's a prepaid bill with the logger's split. Everyone on it
+ * accepts (unless the logger takes 100%), then each pays their share in advance through PayPal. */
+export function createPlannedBill(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; bps: number[] }): Preview {
+  if (e.bps.length !== t.members.length || e.bps.reduce((a, b) => a + b, 0) !== 10000) reject('Split must cover every member and total 100%.');
+  const all = e.bps[m] === 10000;
+  const p: Preview = {
+    id: id(), option_id: '', kind: 'plan', title: e.vendor, meta: `Planned · ${e.date} ${e.time} · added by ${t.members[m].name}`, category: e.type,
+    date: e.date, time: e.time, total_cents: e.total, currency: t.currency, prepaid: true, frozen: false, is_estimate: true,
+    shares: e.bps.map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: all || !ratio_bp, status: 'none' as const })),
+  };
+  t.previews.push(p);
+  return p;
 }
 
 /** What Wayfinder sees: no chat (it gets that separately) and no PayPal order ids. */

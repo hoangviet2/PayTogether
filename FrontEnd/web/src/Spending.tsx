@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
 import { money, pct, summarizeTrip, type Txn } from '../../shared/trip';
 import { api, type Ctx } from './api';
 import { Icon, icons } from './ui';
-import { Bills, SplitBills } from './Bills';
+import { Bills, SplitBills, StoreBill } from './Bills';
 
 type Row = Txn & { memberName: string; paidByName: string };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
 
 export function Spending({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
-  const grid = useRef<AgGridReact<Row>>(null);
   const [q, setQ] = useState('');
   const [hit, setHit] = useState<{ ids: Set<string>; engine: string } | null>(null);
+  const [adding, setAdding] = useState(false);
 
   // Search runs on the server (Elasticsearch when configured), always scoped to this trip.
   useEffect(() => {
@@ -63,8 +63,11 @@ export function Spending({ ctx }: { ctx: Ctx }) {
           <h2 style={{ fontSize: 20 }}>Spending</h2>
           <span className="small muted">Everyone in the trip sees every transaction. PayPal emails and private notes are never indexed.</span>
         </div>
-        <button type="button" className="btn" onClick={() => grid.current?.api.exportDataAsCsv({ fileName: `${trip.name}-spending.csv` })}>Export CSV</button>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className={`btn ${adding ? 'btn-on' : 'btn-primary'}`} aria-expanded={adding} onClick={() => setAdding((v) => !v)}><Icon d={icons.plus} />Paid at a store</button>
+        </div>
       </div>
+      {adding && <StoreBill ctx={ctx} onDone={() => setAdding(false)} />}
       <div className="col" style={{ gap: 8 }}>
         <label htmlFor="q" className="small" style={{ fontWeight: 600, color: 'var(--body)' }}>Search transactions</label>
         <div className="row" style={{ gap: 10, border: '2px solid var(--brand)', borderRadius: 12, padding: '0 12px', minHeight: 48 }}>
@@ -78,7 +81,6 @@ export function Spending({ ctx }: { ctx: Ctx }) {
       <div>
         <AgGridReact<Row>
           domLayout="autoHeight"
-          ref={grid}
           theme={theme}
           rowData={rows}
           columnDefs={columnDefs}

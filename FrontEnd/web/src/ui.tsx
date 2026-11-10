@@ -232,7 +232,7 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
     <section aria-label={`${p.title} split`} className="card" style={{ padding: 18 }}>
       <div className="between">
         <div className="col" style={{ gap: 3 }}>
-          <span className="eyebrow" style={{ fontSize: 11 }}>{p.kind === 'store' ? `In-store · pays ${p.payee?.email}` : `${p.kind === 'stay' ? 'Stay' : 'Dining'} · ${p.prepaid ? 'prepaid' : 'pay there'}`}</span>
+          <span className="eyebrow" style={{ fontSize: 11 }}>{p.kind === 'store' ? `In-store · pays ${p.payee?.email}` : p.kind === 'plan' ? `Planned ${p.category?.toLowerCase() ?? 'expense'} · prepaid` : `${p.kind === 'stay' ? 'Stay' : 'Dining'} · ${p.prepaid ? 'prepaid' : 'pay there'}`}</span>
           <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 20 }}>{p.title}</span>
           <span className="small muted">{p.meta}</span>
         </div>
@@ -288,19 +288,26 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
   );
 }
 
-declare global {
-  interface Window { paypal?: { Buttons: (o: object) => { render: (el: HTMLElement) => Promise<void>; close: () => Promise<void> } } }
-}
-// One PayPal SDK at a time: a store bill needs the store as merchant-id, so a different src replaces the loaded one.
-let sdk: { src: string; ready: Promise<void>; el: HTMLScriptElement } | null = null;
-const loadScript = (src: string) => {
-  if (sdk?.src === src) return sdk.ready;
-  if (sdk) { sdk.el.remove(); delete window.paypal; }
-  const el = document.createElement('script');
-  const ready = new Promise<void>((ok, fail) => Object.assign(el, { src, onload: () => ok(), onerror: () => fail(new Error('PayPal SDK failed to load')) }));
-  document.head.append(el);
-  sdk = { src, ready, el };
-  return ready;
+type PayPalSdk = { Buttons: (o: object) => { render: (el: HTMLElement) => Promise<void>; close: () => Promise<void> } };
+// A store bill needs the store as merchant-id, so it loads a second SDK. Reloading one SDK over another breaks it
+// ("paypal.Buttons is not a function"), so each src lives under its own data-namespace global.
+const sdks = new Map<string, Promise<PayPalSdk>>();
+const loadSdk = (src: string) => {
+  if (!sdks.has(src)) {
+    const ns = `paypal_sdk_${sdks.size}`;
+    sdks.set(src, new Promise((ok, fail) => {
+      const el = Object.assign(document.createElement('script'), { src });
+      el.dataset.namespace = ns;
+      el.onload = () => {
+        const sdk = (window as unknown as Record<string, PayPalSdk | undefined>)[ns];
+        if (typeof sdk?.Buttons === 'function') ok(sdk);
+        else { sdks.delete(src); fail(new Error('PayPal checkout did not load. Check the store’s PayPal email, then try again.')); }
+      };
+      el.onerror = () => { sdks.delete(src); fail(new Error('PayPal SDK failed to load')); };
+      document.head.append(el);
+    }));
+  }
+  return sdks.get(src)!;
 };
 
 /** PayPal buttons for this member's existing order. Approval here is optimistic; the webhook sets the real status. */
@@ -312,15 +319,15 @@ export function PayShare({ ctx, previewId, orderId, label, currency, autoOpen }:
   const payee = ctx.trip.previews.find((p) => p.id === previewId)?.payee?.email;
   useEffect(() => {
     if (state !== 'open' || !cfg?.paypalClientId || !box.current) return;
-    let btns: ReturnType<NonNullable<Window['paypal']>['Buttons']> | null = null;
+    let btns: ReturnType<PayPalSdk['Buttons']> | null = null;
     let live = true;
     // The order must name the same merchant as the SDK, or PayPal shows "Things don't appear to be working".
     const src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.paypalClientId)}&currency=${currency}&intent=capture${payee ? `&merchant-id=${encodeURIComponent(payee)}` : ''}`;
     // Ask the server for a payable order first: it replaces one PayPal has expired, and captures one already approved.
-    Promise.all([api<{ orderId: string; approved: boolean }>(`/trips/${ctx.trip.id}/previews/${previewId}/pay`, { body: {} }), loadScript(src)]).then(([r]) => {
+    Promise.all([api<{ orderId: string; approved: boolean }>(`/trips/${ctx.trip.id}/previews/${previewId}/pay`, { body: {} }), loadSdk(src)]).then(([r, sdk]) => {
       if (!live) return;
       if (r.approved) return setState('approved');
-      btns = window.paypal!.Buttons({
+      btns = sdk.Buttons({
         createOrder: () => r.orderId,
         onApprove: () => api(`/trips/${ctx.trip.id}/previews/${previewId}/capture`, { body: {} })
           .then(() => setState('approved'))

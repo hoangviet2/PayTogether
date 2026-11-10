@@ -8,7 +8,7 @@ import { Icon, icons, PayShare, PreviewCard } from './ui';
 type Row = { id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
 type GridCtx = { pay: (r: Row) => void };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
-const KIND = { stay: 'Prepaid', dining: 'Prepaid', store: 'In-store', shop: 'Online' } as const;
+const KIND = { stay: 'Prepaid', dining: 'Prepaid', plan: 'Prepaid', store: 'In-store', shop: 'Online' } as const;
 const PAID: Record<Share['status'], string> = { none: '—', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
 const payable = (r: Row) => r.isMe && !!r.orderId && (r.status === PAID.created || r.status === PAID.failed);
 
@@ -46,7 +46,6 @@ function PayCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCt
 export function Bills({ ctx }: { ctx: Ctx }) {
   const { trip, me } = ctx;
   const [paying, setPaying] = useState<Row | null>(null);
-  const [adding, setAdding] = useState(false);
   const [paidMsg, setPaidMsg] = useState<string | null>(null);
 
   const rows = useMemo<Row[]>(() => trip.previews.flatMap((p) => {
@@ -83,7 +82,6 @@ export function Bills({ ctx }: { ctx: Ctx }) {
           <h2 id="bills-h" style={{ fontSize: 20 }}>Bills and payments</h2>
           <span className="small muted">Shares show up here once accepted. When everyone on a bill has accepted, pay your share whenever you’re ready.{mine.length ? ` You have ${mine.length} to pay.` : ''}</span>
         </div>
-        <button type="button" className={`btn ${adding ? 'btn-on' : ''}`} aria-expanded={adding} onClick={() => setAdding((v) => !v)}><Icon d={icons.plus} />Pay at a store</button>
       </div>
       {paidMsg && (
         <p role="status" className="row small" style={{ gap: 8, margin: 0, background: 'var(--blue-tint)', color: 'var(--brand)', padding: '10px 14px', borderRadius: 10, justifyContent: 'space-between' }}>
@@ -91,7 +89,6 @@ export function Bills({ ctx }: { ctx: Ctx }) {
           <button type="button" className="btn" style={{ minHeight: 32 }} onClick={() => setPaidMsg(null)}>Dismiss</button>
         </p>
       )}
-      {adding && <StoreBill ctx={ctx} onDone={() => setAdding(false)} />}
       {rows.length ? (
         <AgGridReact<Row> theme={theme} rowData={rows} columnDefs={columnDefs} defaultColDef={defaultColDef} getRowId={(p) => p.data.id}
           context={context} domLayout="autoHeight" rowHeight={48} />
@@ -110,8 +107,12 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** In-store checkout for things nobody planned (a dinner, a ticket at the door): each person pays the store's PayPal. */
-function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
+/** Now as an ISO string in the payer's time zone ('YYYY-MM-DDTHH:MM…'). */
+const localNow = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString(); };
+
+/** Paid at a store (a dinner, a ticket at the door): already settled at the counter, so it goes straight into the
+ * transactions with the payer's split. Nothing to pay through PayPal; the others owe the payer (Dashboard → settle up). */
+export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
   const { trip, me, act } = ctx;
   // Percent per member as typed; 0 means not on the bill. Starts equal.
   const [pcts, setPcts] = useState(() => equalBps(trip.members.length).map((b) => String(b / 100)));
@@ -121,22 +122,21 @@ function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const total = Math.round(parseFloat(String(f.get('total'))) * 100);
-    await act('/store-bills', { vendor: String(f.get('vendor')).trim(), email: String(f.get('email')).trim(), total, category: f.get('category'), members: [], bps });
+    const local = localNow();
+    await act('/txns', { date: local.slice(0, 10), time: local.slice(11, 16), vendor: String(f.get('vendor')).trim(), type: String(f.get('category')), total, bps, paid: true, store: true });
     onDone();
   };
   return (
     <form onSubmit={submit} className="col" style={{ gap: 12, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 14, padding: 16 }}>
-      <p className="small muted">For costs nobody planned, like a dinner. The store must accept PayPal. {trip.solo ? 'You accept' : 'Everyone on the bill accepts'} the amount, then pays the store’s PayPal directly.{trip.solo ? '' : ' If you take 100%, nobody else has to accept.'}</p>
+      <p className="small muted">You already paid at the store. It goes straight into the transactions below; nothing more to pay.{trip.solo ? '' : ' The others owe you their share (Dashboard → settle up).'}</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <label className="field">Store<input name="vendor" required maxLength={60} placeholder="Pho 24" /></label>
-        <label className="field">Store’s PayPal email<input name="email" type="email" required placeholder="pay@store.com" aria-describedby="store-email-hint" />
-          <span id="store-email-hint" className="small muted" style={{ fontWeight: 400 }}>Email only. PayPal can’t pay a phone number.</span></label>
         <label className="field">Total ({trip.currency})<input name="total" inputMode="decimal" required pattern="\d+(\.\d{1,2})?" placeholder="42.50" /></label>
         <label className="field">Type<select name="category">{['Restaurant', 'Store', 'Transport', 'Tickets', 'Other'].map((c) => <option key={c}>{c}</option>)}</select></label>
       </div>
       {!trip.solo && (
         <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
-          <legend className="field" style={{ marginBottom: 6 }}>Split (0% = not on the bill; each can still move their own bar later)</legend>
+          <legend className="field" style={{ marginBottom: 6 }}>Split (0% = not on it)</legend>
           <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
             {trip.members.map((m, i) => (
               <label key={i} className="row" style={{ gap: 6, fontSize: 14, minHeight: 44 }}>
@@ -152,7 +152,7 @@ function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
       )}
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" className="btn" onClick={onDone}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={sum !== 10000}>Add bill</button>
+        <button type="submit" className="btn btn-primary" disabled={sum !== 10000}>Save payment</button>
       </div>
     </form>
   );

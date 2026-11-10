@@ -268,8 +268,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (c === 'txns' && is('POST', 4)) {
       const i = await body(req, z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/), vendor: name, type: name,
-        total: z.number().int().positive().max(100_000_00), bps: z.array(z.number().int().min(0).max(10000)),
+        total: z.number().int().positive().max(100_000_00), bps: z.array(z.number().int().min(0).max(10000)), paid: z.boolean().default(true), store: z.boolean().default(false),
       }));
+      if (!i.paid) { // just planned: a bill in Split bills, paid in advance once everyone accepts
+        const p = store.createPlannedBill(t, m, i);
+        if (store.readyToCharge(p)) await sendOrders(t, p.id); // the logger took 100%
+        persist();
+        return send(t);
+      }
       const rows = store.logExpense(t, m, i);
       persist();
       reindex(t, rows);

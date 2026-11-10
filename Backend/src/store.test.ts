@@ -178,6 +178,16 @@ test('taking 100% needs nobody else; store bills take a custom split', () => {
   assert.throws(() => s.createStoreBill(t, 0, { vendor: 'X', email: 'x@x.com', total: 1, category: 'Store', members: [], bps: [5000, 4000, 0] }), /100%/);
 });
 
+test('planned expense: a prepaid bill on its own date; 100% for the logger skips the others', () => {
+  const t = s.createTrip('Plan', 'USD', ['Ana', 'Ben']);
+  const e = { date: '2027-05-20', time: '19:30', vendor: 'Ferry', type: 'Transport', total: 3000 };
+  const p = s.createPlannedBill(t, 0, { ...e, bps: [6000, 4000] });
+  assert.equal(s.readyToCharge(p), false);
+  assert.equal(s.createPlannedBill(t, 0, { ...e, bps: [10000, 0] }).shares.every((x) => x.accepted), true);
+  const rows = s.ordersCreated(t, p, ['o1', 'o2']);
+  assert.deepEqual(rows.map((r) => [r.date, r.time, r.amount, r.source]), [['2027-05-20', '19:30', 1800, 'Prepaid share'], ['2027-05-20', '19:30', 1200, 'Prepaid share']]);
+});
+
 test('delete trip: owner only, never once PayPal requests exist', () => {
   const t = s.createTrip('Del', 'USD', ['Ana', 'Ben']);
   assert.throws(() => s.deleteTrip(t, 1), /created the trip/);
