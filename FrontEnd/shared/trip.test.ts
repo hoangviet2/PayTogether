@@ -121,3 +121,14 @@ test('nights: +1 in one stop comes from the stop with the most nights; total sta
   assert.deepEqual(m.fitNights([3, 5, 2], 8), [3, 3, 2]);
   assert.equal(m.fitNights([3, 5, 2], 2), null);
 });
+
+test('split: setting your share spreads the rest over the others in proportion; always 100%', async () => {
+  const m = await import('./trip.ts');
+  assert.deepEqual(m.rebalanceShares([5000, 5000], 0, 3000), [3000, 7000]); // 2 people: the other covers the rest
+  assert.deepEqual(m.rebalanceShares([3334, 3333, 3333], 0, 4000), [4000, 3000, 3000]);
+  assert.deepEqual(m.rebalanceShares([4000, 4000, 2000], 2, 3000), [3500, 3500, 3000]);
+  assert.deepEqual(m.rebalanceShares([10000, 0, 0], 0, 4000), [4000, 3000, 3000]); // others at 0 → equal
+  assert.deepEqual(m.rebalanceShares([5000, 5000, 0], 0, 2000), [2000, 8000, 0]); // a 0 share stays 0 (not on this bill)
+  assert.deepEqual(m.rebalanceShares([10000], 0, 3000), [10000]); // solo is always 100%
+  for (const bp of [0, 1, 3333, 9999, 10000]) assert.equal(sum(m.rebalanceShares([2500, 2500, 2500, 2500], 1, bp)), 10000);
+});

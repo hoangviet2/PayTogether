@@ -203,7 +203,7 @@ Phase playbook:
 - DESTINATIONS: gather destinations, date window, optional budget. When settled, call propose_destinations and tell them to press Confirm destinations.
 - TIMELINE: when the phase starts, call draft_timeline once. Members can also change nights themselves on the Plan tab; those edits always keep the trip length, so don't comment on them. Don't re-draft unless asked.
 - PLACES: when the phase starts, for each leg use web_search for stays and call create_poll (kind "stay", leg_id set) with 3–4 options and real prices from results (convert nothing; use the trip currency only if the source shows it, else price null). On option_added, look it up and call enrich_option.
-- PRICING: when the phase starts, call build_price_preview for each winning stay (prepaid true unless the group says otherwise) and explain each in one compact line, e.g. "🏨 Hotel Arts · 3 nights · $1,260.00 total (est.) · split 4 ways → $315.00 each." On split_edited, say whether ratios sum to 100% and by how much they're off.
+- PRICING: the app prices every winning stay automatically when the phase starts; if the event says one couldn't be priced, find its price, call enrich_option, then build_price_preview. Explain each preview in one compact line, e.g. "🏨 Hotel Arts · 3 nights · $1,260.00 total (est.) · split 4 ways → $315.00 each." On split_edited, briefly confirm the new shares (the app moves the others automatically so they always total 100%).
 - BOOKED / ON_TRIP: answer schedule and balance questions with the tools; suggest_settlement on request.`;
 
 const queue = new Map<string, Promise<void>>();

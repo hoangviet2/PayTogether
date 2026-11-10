@@ -34,7 +34,7 @@ test('confirm needs every member; tie keeps the poll open; full vote closes it',
   assert.match(s.confirm(t, 2)!, /PRICING/);
 });
 
-test('split: members edit only their own ratio, acceptances reset, orders only at 100%', () => {
+test('split: setting a share moves the others to keep 100%, acceptances reset', () => {
   const { t, poll } = pricedTrip();
   [0, 1, 2].forEach((m) => s.vote(t, poll.id, poll.options[0].id, m));
   [0, 1, 2].forEach((m) => s.confirm(t, m));
@@ -44,10 +44,9 @@ test('split: members edit only their own ratio, acceptances reset, orders only a
   assert.deepEqual(p.shares.map((x) => x.ratio_bp), [3334, 3333, 3333]);
 
   s.accept(t, p.id, 0);
-  assert.match(s.setRatio(t, p.id, 1, 4000), /over 100% by 6\.67%/);
-  assert.deepEqual(p.shares.map((x) => x.ratio_bp), [3334, 4000, 3333]); // nobody else moved
+  assert.match(s.setRatio(t, p.id, 1, 4000), /Ana 30\.00%, Cy 30\.00%/);
+  assert.deepEqual(p.shares.map((x) => x.ratio_bp), [3000, 4000, 3000]); // the rest spread in proportion
   assert.ok(p.shares.every((x) => !x.accepted));
-  assert.throws(() => s.accept(t, p.id, 0), /100%/);
   assert.throws(() => s.resetEqual(t, p.id, 1), /owner/);
   s.resetEqual(t, p.id, 0);
   assert.equal(s.accept(t, p.id, 0), false);
@@ -131,4 +130,37 @@ test('plan edits: +1 night rebalances, dates refit, stops keep ids, locked from 
   assert.equal(t.legs.at(-1)!.depart_date, t.window!.end);
   t.phase = 'PRICING';
   assert.throws(() => s.updateTrip(t, { name: 'X' }), /locked/);
+});
+
+test('pricing: entering Pricing prices every stop; booking waits for every stay', () => {
+  const t = s.createTrip('3 hotels', 'USD', ['Ana', 'Ben'], 'pp-ana');
+  s.proposeDestinations(t, ['A', 'B', 'C'], '2027-05-01', '2027-05-07');
+  [0, 1].forEach((m) => s.confirm(t, m));
+  const leg = (name: string, a: string, d: string) => ({ destination: { name, country: 'X' }, nights: 2, arrive_date: a, depart_date: d });
+  s.draftTimeline(t, [leg('A', '2027-05-01', '2027-05-03'), leg('B', '2027-05-03', '2027-05-05'), leg('C', '2027-05-05', '2027-05-07')]);
+  [0, 1].forEach((m) => s.confirm(t, m));
+  for (const l of t.legs) {
+    const poll = s.createPoll(t, { kind: 'stay', leg_id: l.id, question: l.destination.name, options: [
+      { name: `${l.destination.name} Inn`, price: { amount_cents: 10000, currency: 'USD', unit: 'per_night' }, source: 'web_search', why: 'x' },
+      { name: 'Other', price: null, source: 'web_search', why: 'y' }] });
+    [0, 1].forEach((m) => s.vote(t, poll.id, poll.options[0].id, m));
+  }
+  s.confirm(t, 0);
+  assert.match(s.confirm(t, 1)!, /Every stop's winning stay now has a price preview/);
+  assert.equal(t.previews.filter((p) => p.kind === 'stay').length, 3); // all three hotels, not two
+  assert.deepEqual(t.previews.map((p) => p.total_cents), [20000, 20000, 20000]);
+});
+
+test('split and store bills: the other covers the rest; 0% members get no row', () => {
+  const t = s.createTrip('Dinner', 'USD', ['Ana', 'Ben', 'Cy']);
+  const p = s.createStoreBill(t, 0, { vendor: 'Pho 24', email: 'Pho@Store.com', total: 9000, category: 'Restaurant', members: [0, 1] });
+  assert.deepEqual(p.shares.map((x) => x.ratio_bp), [5000, 5000, 0]);
+  assert.equal(p.shares[2].accepted, true); // not on the bill
+  s.setRatio(t, p.id, 0, 3000);
+  assert.deepEqual(p.shares.map((x) => x.ratio_bp), [3000, 7000, 0]);
+  assert.equal(s.accept(t, p.id, 0), false);
+  assert.equal(s.accept(t, p.id, 1), true); // everyone on it accepted → orders go out
+  const rows = s.ordersCreated(t, p, ['o1', 'o2', '']);
+  assert.deepEqual(rows.map((r) => [r.member, r.amount, r.source]), [[0, 2700, 'In-store'], [1, 6300, 'In-store']]);
+  assert.equal(p.payee!.email, 'pho@store.com');
 });

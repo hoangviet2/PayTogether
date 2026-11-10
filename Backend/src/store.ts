@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomInt, randomUUID } from 'node:crypto';
 import {
-  PALETTE, PHASES, confirmBlocker, daysBetween, equalBps, fitNights, pollTally, rebalanceNights, redate, shareAmounts, validateTimeline,
+  PALETTE, PHASES, confirmBlocker, daysBetween, equalBps, fitNights, pollTally, rebalanceNights, rebalanceShares, redate, shareAmounts, validateTimeline,
   type Leg, type PlaceOption, type Poll, type Preview, type Trip, type Txn,
 } from '../../FrontEnd/shared/trip.ts';
 
@@ -92,7 +92,20 @@ export function confirm(t: Trip, m: number): string | null {
 function advance(t: Trip): string {
   t.phase = PHASES[PHASES.indexOf(t.phase) + 1];
   t.confirms = [];
-  return `phase_changed: the group confirmed, phase is now ${t.phase}.`;
+  return `phase_changed: the group confirmed, phase is now ${t.phase}.${t.phase === 'PRICING' ? priceStays(t) : ''}`;
+}
+
+/** Entering Pricing: a prepaid price preview for every stop's winning stay, so no stay is left out of the bill. */
+function priceStays(t: Trip): string {
+  const missing: string[] = [];
+  for (const l of t.legs) {
+    const poll = t.polls.find((p) => p.kind === 'stay' && p.leg_id === l.id && p.status === 'closed' && p.winner);
+    if (!poll || t.previews.some((p) => p.option_id === poll.winner)) continue;
+    try { buildPricePreview(t, poll.winner!, true); } catch (e) { missing.push(`${l.destination.name}: ${(e as Error).message}`); }
+  }
+  return missing.length
+    ? ` Priced the other stays automatically. Could not price ${missing.join('; ')}. Find each price with web_search, call enrich_option, then build_price_preview.`
+    : ' Every stop\'s winning stay now has a price preview.';
 }
 
 // ---------- Wayfinder tool writes ----------
@@ -248,10 +261,10 @@ export function updateTrip(t: Trip, p: { name?: string; start_date?: string; end
 /** A member sets only their own ratio (invariant 7). Any change resets every acceptance. */
 export function setRatio(t: Trip, previewId: string, m: number, bp: number): string {
   const p = editablePreview(t, previewId);
-  p.shares[m].ratio_bp = Math.max(0, Math.min(10000, Math.round(bp)));
-  p.shares.forEach((s) => (s.accepted = false));
-  const off = p.shares.reduce((a, s) => a + s.ratio_bp, 0) - 10000;
-  return `split_edited: ${t.members[m].name} set their share of ${p.title} to ${(p.shares[m].ratio_bp / 100).toFixed(2)}%. ${off ? `Ratios are ${off > 0 ? 'over' : 'under'} 100% by ${(Math.abs(off) / 100).toFixed(2)}%.` : 'Ratios sum to 100%.'}`;
+  const bps = rebalanceShares(p.shares.map((s) => s.ratio_bp), m, bp);
+  // Everyone re-accepts the new amounts, except people not on a store bill (0%), who owe nothing there.
+  p.shares.forEach((s, i) => Object.assign(s, { ratio_bp: bps[i], accepted: !!p.payee && bps[i] === 0 }));
+  return `split_edited: ${t.members[m].name} set their share of ${p.title} to ${(bps[m] / 100).toFixed(2)}%; the others now have ${p.shares.flatMap((s, i) => (i === m ? [] : [`${t.members[i].name} ${(s.ratio_bp / 100).toFixed(2)}%`])).join(', ')}.`;
 }
 
 /** Only the trip owner (member 0) can reset everyone to equal. */
@@ -266,7 +279,7 @@ export function accept(t: Trip, previewId: string, m: number): boolean {
   const p = editablePreview(t, previewId);
   if (!shareAmounts(p)) reject('Shares must add up to 100% before anyone can accept.');
   p.shares[m].accepted = !p.shares[m].accepted;
-  return p.prepaid && p.shares.every((s) => s.accepted);
+  return (p.prepaid || !!p.payee) && p.shares.every((s) => s.accepted); // store bills also get PayPal requests
 }
 
 function editablePreview(t: Trip, previewId: string) {
@@ -280,13 +293,14 @@ export function ordersCreated(t: Trip, p: Preview, orderIds: string[]): Txn[] {
   const cents = shareAmounts(p)!;
   const leg = t.legs.find((l) => l.id === p.leg_id);
   p.frozen = true;
-  const rows = p.shares.map((s, i): Txn => {
+  const rows = p.shares.flatMap((s, i): Txn[] => {
+    if (!s.ratio_bp) return []; // a 0% share has nothing to pay
     Object.assign(s, { order_id: orderIds[i], status: 'created' });
-    return {
-      id: `${p.id}-${i}`, member: i, paid_by: i, date: leg?.arrive_date ?? now().slice(0, 10), time: '15:00', vendor: p.title,
-      type: p.kind === 'stay' ? 'Hotel' : 'Restaurant', leg: leg?.destination.name ?? '', amount: cents[i], total: p.total_cents,
-      shareBp: s.ratio_bp, source: 'Prepaid share', status: 'created', nights: p.kind === 'stay' ? leg?.nights : undefined,
-    };
+    return [{
+      id: `${p.id}-${i}`, member: i, paid_by: i, date: leg?.arrive_date ?? now().slice(0, 10), time: p.payee ? now().slice(11, 16) : '15:00', vendor: p.title,
+      type: p.kind === 'stay' ? 'Hotel' : p.category ?? 'Restaurant', leg: leg?.destination.name ?? '', amount: cents[i], total: p.total_cents,
+      shareBp: s.ratio_bp, source: p.payee ? 'In-store' : 'Prepaid share', status: 'created', nights: p.kind === 'stay' ? leg?.nights : undefined,
+    }];
   });
   t.txs.push(...rows);
   return rows;
@@ -305,7 +319,8 @@ export function paymentStatus(orderId: string, status: 'approved' | 'captured' |
       let event: string | null = null;
       if (status === 'failed') event = `payment_failed: ${t.members[i].name}'s payment for ${p.title} did not go through.`;
       const prepaid = t.previews.filter((x) => x.prepaid);
-      if (t.phase === 'PRICING' && prepaid.length && prepaid.every((x) => x.frozen && x.shares.every((s) => s.status === 'captured'))) {
+      const everyStay = t.legs.every((l) => prepaid.some((x) => x.kind === 'stay' && x.leg_id === l.id)); // no stop left unbooked
+      if (t.phase === 'PRICING' && prepaid.length && everyStay && prepaid.every((x) => x.frozen && x.shares.every((s) => !s.ratio_bp || s.status === 'captured'))) {
         t.phase = 'BOOKED';
         t.confirms = [];
         event = 'phase_changed: every prepaid share is paid, phase is now BOOKED.';
@@ -313,6 +328,23 @@ export function paymentStatus(orderId: string, status: 'approved' | 'captured' |
       return { trip: t, row, event };
     }
   return null;
+}
+
+/** In-store bill: someone at the counter enters the store's PayPal email and total; it starts split equally among the
+ * members on it. Once everyone on it accepts, each gets a PayPal request that pays the store directly. */
+export function createStoreBill(t: Trip, m: number, b: { vendor: string; email: string; total: number; category: string; members: number[] }): Preview {
+  if (t.phase === 'SETTLED') reject('This trip is settled.');
+  const on = [...new Set(b.members)].filter((i) => i >= 0 && i < t.members.length);
+  if (!on.includes(m)) on.push(m);
+  const eq = equalBps(on.length);
+  const p: Preview = {
+    id: id(), option_id: '', kind: 'store', title: b.vendor, meta: `In-store · added by ${t.members[m].name}`,
+    payee: { name: b.vendor, email: b.email.trim().toLowerCase() }, category: b.category,
+    total_cents: b.total, currency: t.currency, prepaid: false, frozen: false, is_estimate: true,
+    shares: t.members.map((_, i) => ({ member: i, ratio_bp: on.includes(i) ? eq[on.indexOf(i)] : 0, accepted: !on.includes(i), status: 'none' })),
+  };
+  t.previews.push(p);
+  return p;
 }
 
 /** On-trip expense: one row per member share, all paid by the logger. */

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import {
   CONFIRM_LABEL, PHASES, PHASE_LABEL, confirmBlocker, money, pct, ratioSum, shareAmounts,
   type Person, type Preview, type Share,
@@ -27,6 +29,29 @@ export const icons = {
   clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
   check: 'M5 12l5 5L20 7',
 };
+
+// Math in chat: $$…$$ and \[…\] as display, \(…\) and $…$ inline. A $ counts as math only when no space or digit
+// follows it and none precedes the closing $, so prices like "$315.00 each" stay plain text.
+const MATH = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?![\s\d])([^$\n]+?)(?<!\s)\$(?!\d)|\*\*([^*\n]+)\*\*/g;
+
+/** Chat text with LaTeX (KaTeX, which escapes its input) and **bold**. Everything else renders as plain text. */
+export function RichText({ text }: { text: string }) {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(MATH)) {
+    out.push(text.slice(last, m.index));
+    const [, display, bracket, paren, inline, bold] = m;
+    if (bold !== undefined) out.push(<strong key={m.index}>{bold}</strong>);
+    else {
+      const tex = display ?? bracket ?? paren ?? inline;
+      const html = katex.renderToString(tex, { displayMode: display !== undefined || bracket !== undefined, throwOnError: false });
+      out.push(<span key={m.index} dangerouslySetInnerHTML={{ __html: html }} />);
+    }
+    last = m.index + m[0].length;
+  }
+  out.push(text.slice(last));
+  return <>{out}</>;
+}
 
 /** Back to the previous page, or home when there is none (opened from a link or a fresh tab). */
 export const BackLink = ({ label = 'Back' }: { label?: string }) => (
@@ -146,7 +171,7 @@ export function Chat({ ctx }: { ctx: Ctx }) {
             <div key={k} className="msg msg-me">
               <div className="col" style={{ alignItems: 'flex-end', maxWidth: '80%' }}>
                 <span className="small muted">You · {time}</span>
-                <p>{m.text}</p>
+                <p><RichText text={m.text} /></p>
               </div>
             </div>
           ) : (
@@ -154,7 +179,7 @@ export function Chat({ ctx }: { ctx: Ctx }) {
               {m.from === 'ai' ? <span className="ai-badge"><Icon d={icons.compass} /></span> : <Chip p={trip.members[m.from]} />}
               <div className="col" style={{ gap: 8, minWidth: 0, flex: 1 }}>
                 <span className="small"><strong>{m.from === 'ai' ? 'Wayfinder' : trip.members[m.from].name}</strong> <span className="muted">· {time}</span></span>
-                <p style={{ whiteSpace: 'pre-wrap' }}>{m.text}</p>
+                <p style={{ whiteSpace: 'pre-wrap', overflowX: 'auto' }}><RichText text={m.text} /></p>
               </div>
             </div>
           );
@@ -188,7 +213,7 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
     <section aria-label={`${p.title} split`} className="card" style={{ padding: 18 }}>
       <div className="between">
         <div className="col" style={{ gap: 3 }}>
-          <span className="eyebrow" style={{ fontSize: 11 }}>{p.kind === 'stay' ? 'Stay' : 'Dining'} · {p.prepaid ? 'prepaid' : 'pay there'}</span>
+          <span className="eyebrow" style={{ fontSize: 11 }}>{p.kind === 'store' ? `In-store · pays ${p.payee?.email}` : `${p.kind === 'stay' ? 'Stay' : 'Dining'} · ${p.prepaid ? 'prepaid' : 'pay there'}`}</span>
           <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 20 }}>{p.title}</span>
           <span className="small muted">{p.meta}</span>
         </div>
@@ -231,15 +256,13 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
         </span>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           {!p.frozen && me === 0 && !trip.solo && <button type="button" className="btn" onClick={() => act(`/previews/${p.id}/equal`)}>Reset to equal</button>}
-          {!p.frozen && (
+          {!p.frozen && !(p.payee && !mine.ratio_bp) && (
             <button type="button" className={`btn ${mine.accepted ? 'btn-on' : 'btn-primary'}`} disabled={!cents} aria-pressed={mine.accepted}
               onClick={() => act(`/previews/${p.id}/accept`)}>
               {mine.accepted ? 'Accepted' : cents ? `Accept ${money(cents[me], p.currency)}` : 'Accept'}
             </button>
           )}
-          {p.frozen && mine.order_id && (mine.status === 'created' || mine.status === 'failed') && cents && (
-            <PayShare ctx={ctx} previewId={p.id} orderId={mine.order_id} label={`Pay my share · ${money(cents[me], p.currency)}`} currency={p.currency} />
-          )}
+
         </div>
       </div>
     </section>
@@ -259,10 +282,10 @@ const loadScript = (src: string) => {
 };
 
 /** PayPal buttons for this member's existing order. Approval here is optimistic; the webhook sets the real status. */
-function PayShare({ ctx, previewId, orderId, label, currency }: { ctx: Ctx; previewId: string; orderId: string; label: string; currency: string }) {
+export function PayShare({ ctx, previewId, orderId, label, currency, autoOpen }: { ctx: Ctx; previewId: string; orderId: string; label: string; currency: string; autoOpen?: boolean }) {
   const cfg = useConfig();
   const box = useRef<HTMLDivElement>(null);
-  const [state, setState] = useState<'idle' | 'open' | 'approved' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'open' | 'approved' | 'error'>(autoOpen ? 'open' : 'idle');
   const [msg, setMsg] = useState('');
   useEffect(() => {
     if (state !== 'open' || !cfg?.paypalClientId || !box.current) return;

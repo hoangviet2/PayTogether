@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type Ref } from 'react';
-import { addDays, daysBetween, equalBps, largestRemainder, money, type Trip, type Txn } from '../../shared/trip';
+import { addDays, equalBps, largestRemainder, money, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
 import { Chip, Icon, icons } from './ui';
 
@@ -9,7 +9,7 @@ const short = (iso: string) => `${weekday(iso)} ${Number(iso.slice(8))}`;
 const legOn = (t: Trip, d: string) => t.legs.find((l) => d >= l.arrive_date && d < l.depart_date)?.destination.name ?? null;
 
 const evtStyle = (t: Txn, c: string, tint: string) => {
-  if (t.source !== 'Prepaid share') return { background: '#fff', borderColor: c, color: c };
+  if (t.source !== 'Prepaid share' && t.source !== 'In-store') return { background: '#fff', borderColor: c, color: c };
   if (t.status === 'captured') return { background: tint, borderColor: c, color: '#012169' };
   return { background: '#fff', borderColor: c, borderStyle: 'dashed', color: '#012169' };
 };
@@ -20,7 +20,7 @@ export function Schedule({ ctx }: { ctx: Ctx }) {
   const [logDay, setLogDay] = useState(trip.window?.start ?? '');
   const dlg = useRef<HTMLDialogElement>(null);
   if (!trip.window) return <section className="card"><h2 style={{ fontSize: 20 }}>Schedule</h2><p className="muted">The schedule appears once the group confirms dates with Wayfinder.</p></section>;
-  const days = Array.from({ length: daysBetween(trip.window.start, trip.window.end) + 1 }, (_, k) => addDays(trip.window!.start, k));
+  const days = tripDays(trip);
   const openLog = (d: string) => { setLogDay(d); dlg.current?.showModal(); };
 
   return (
@@ -107,7 +107,7 @@ function months(days: string[]) {
   });
 }
 
-function Calendar({ trip, days }: { trip: Trip; days: string[] }) {
+export function Calendar({ trip, days }: { trip: Trip; days: string[] }) {
   const [sel, setSel] = useState(days[0]);
   const items = trip.txs.filter((t) => t.date === sel && t.status !== 'failed');
   return (

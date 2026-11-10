@@ -14,7 +14,7 @@ export type Tx = {
   amount: number;
   total: number;
   shareBp: number;
-  source: 'Prepaid share' | 'On-trip log' | 'Online purchase';
+  source: 'Prepaid share' | 'On-trip log' | 'Online purchase' | 'In-store';
   status: TxStatus;
   nights?: number; // prepaid stays span their leg on the schedule
 };
@@ -277,7 +277,8 @@ export type Poll = { id: string; kind: 'destination' | 'stay' | 'dining' | 'cust
 export type ShareStatus = 'none' | 'created' | 'approved' | 'captured' | 'failed';
 export type Share = { member: number; ratio_bp: number; accepted: boolean; status: ShareStatus; order_id?: string };
 export type Preview = {
-  id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining'; title: string; meta: string;
+  id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining' | 'store'; title: string; meta: string;
+  payee?: { name: string; email: string }; category?: string; // store bills: each member pays the store's PayPal directly
   total_cents: number; currency: string; prepaid: boolean; shares: Share[]; frozen: boolean; is_estimate: true;
 };
 export type Txn = {
@@ -299,6 +300,9 @@ export const money = (cents: number, currency: string) =>
 /** ISO date + n days, UTC so time zones never shift the day. */
 export const addDays = (iso: string, n: number) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
 export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+
+/** Every day of the trip window, start to end. */
+export const tripDays = (t: Pick<Trip, 'window'>) => (t.window ? Array.from({ length: daysBetween(t.window.start, t.window.end) + 1 }, (_, k) => addDays(t.window!.start, k)) : []);
 
 /** ai.md §2.2: contiguous legs, depart = arrive + nights, total nights fit the window exactly. */
 export function validateTimeline(legs: Leg[], window: Trip['window']): string[] {
@@ -348,8 +352,20 @@ export function rebalanceNights(nights: number[], k: number, value: number): num
 }
 
 export const ratioSum = (p: Preview) => p.shares.reduce((a, s) => a + s.ratio_bp, 0);
-/** Cents per share, or null while ratios don't sum to 100% (ai.md §2.4: nobody else's ratio moves). */
+/** Cents per share, or null while ratios don't sum to 100%. */
 export const shareAmounts = (p: Preview) => (ratioSum(p) === 10000 ? largestRemainder(p.total_cents, p.shares.map((s) => s.ratio_bp)) : null);
+/** Member m sets their share to bp; the rest is spread over the others in their current proportions
+ * (equally if the others are all at 0), so shares always total 100%. 2 people: 30% → the other gets 70%. */
+export function rebalanceShares(bps: number[], m: number, bp: number): number[] {
+  if (bps.length === 1) return [10000];
+  const mine = Math.max(0, Math.min(10000, Math.round(bp)));
+  const others = bps.map((b, i) => (i === m ? 0 : b));
+  const weights = others.some((b) => b > 0) ? others : bps.map((_, i) => (i === m ? 0 : 1));
+  const out = largestRemainder(10000 - mine, weights);
+  out[m] = mine;
+  return out;
+}
+
 export const equalBps = (n: number) => largestRemainder(10000, Array(n).fill(1));
 
 export function pollTally(p: Poll) {
@@ -439,7 +455,11 @@ export function confirmBlocker(t: Trip): string | null {
       const open = t.legs.find((l) => !t.polls.some((p) => p.kind === 'stay' && p.leg_id === l.id && p.status === 'closed' && p.winner));
       return open ? `Pick a stay for ${open.destination.name} first.` : null;
     }
-    case 'PRICING': return t.previews.some((p) => p.prepaid) ? 'Booking happens when every prepaid share is paid.' : null;
+    case 'PRICING': {
+      const unpriced = t.legs.find((l) => !t.previews.some((p) => p.kind === 'stay' && p.leg_id === l.id));
+      if (unpriced) return `The stay for ${unpriced.destination.name} has no price yet. Ask Wayfinder to price it.`;
+      return t.previews.some((p) => p.prepaid) ? 'Booking happens when every prepaid share is paid.' : null;
+    }
     case 'SETTLED': return 'This trip is settled.';
     default: return null;
   }

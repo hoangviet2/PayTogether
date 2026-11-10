@@ -3,7 +3,8 @@
 Guidance for Claude (and other coding agents) working in this repository. Read `design.md` for the system design and `ai.md` for chatbot behavior before making changes in those areas.
 
 ## What this app is
-Group trip planner: an AI host (Wayfinder) in a group chat plans destinations → timeline → places (polls) → price previews; prepaid items are split across members' PayPal accounts; spending shows on a Bryntum schedule and an AG Grid/Charts dashboard with Elasticsearch search; Channel3 + Kernel power online shopping.
+Group trip planner: an AI host (Wayfinder) in a group chat plans destinations → timeline → places (polls) → price previews; prepaid items are split across members' PayPal accounts; spending shows on a 
+Bryntum schedule and an AG Grid/Charts dashboard with Elasticsearch search; Channel3 + Kernel power online shopping.
 
 ## Stack
 - **App:** Next.js (App Router) + TypeScript (strict), React, Tailwind

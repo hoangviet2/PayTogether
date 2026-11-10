@@ -214,6 +214,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       persist();
       return send(t);
     }
+    if (c === 'store-bills' && is('POST', 4)) {
+      const i = await body(req, z.object({
+        vendor: name, email: z.string().trim().email().max(254), total: z.number().int().positive().max(100_000_00),
+        category: z.enum(['Restaurant', 'Store', 'Transport', 'Tickets', 'Other']), members: z.array(z.number().int().min(0)).max(20),
+      }));
+      store.createStoreBill(t, m, i);
+      persist();
+      return send(t);
+    }
     if (c === 'txns' && is('POST', 4)) {
       const i = await body(req, z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/), vendor: name, type: name,
@@ -267,14 +276,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 async function sendOrders(t: Trip, previewId: string) {
   const p = t.previews.find((x) => x.id === previewId)!;
   const cents = shareAmounts(p)!;
-  const orders = p.shares.map((s, i) => ({
-    requestId: `${p.id}-${s.ratio_bp}-${i}`, customId: `${t.id}:${p.id}:${i}`, cents: cents[i], currency: p.currency,
-    description: `${t.name} · ${p.title} · ${t.members[i].name}'s share`,
+  const payers = p.shares.flatMap((s, i) => (s.ratio_bp ? [i] : [])); // 0% shares get no order
+  const orders = payers.map((i) => ({
+    requestId: `${p.id}-${p.shares[i].ratio_bp}-${i}`, customId: `${t.id}:${p.id}:${i}`, cents: cents[i], currency: p.currency,
+    description: `${t.name} · ${p.title} · ${t.members[i].name}'s share`, ...(p.payee && { payee: p.payee.email }),
   }));
   const ids = await workflows.offload(ext.ready.paypal, 'paypal-orders', [orders], () => Promise.all(orders.map(ext.createOrder)));
-  const rows = store.ordersCreated(t, p, ids);
+  const rows = store.ordersCreated(t, p, p.shares.map((_, i) => ids[payers.indexOf(i)] ?? ''));
   reindex(t, rows);
-  store.say(t, 'ai', 'Each of you has a payment request for your share — tap Pay my share.');
+  store.say(t, 'ai', `Everyone accepted ${p.title}. Your share is in Bills and payments on the Plan tab; pay it from there whenever you're ready.`);
 }
 
 createServer((req, res) => {

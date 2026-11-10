@@ -95,12 +95,13 @@ export function readSession(token: string): { user: string; name: string } | nul
 }
 
 /** One order per member share. PayPal-Request-Id makes a retry return the same order (invariant 4). */
-export async function createOrder(o: { requestId: string; customId: string; cents: number; currency: string; description: string }) {
+/** payee: pay this PayPal account instead of ours (in-store bills pay the store directly). */
+export async function createOrder(o: { requestId: string; customId: string; cents: number; currency: string; description: string; payee?: string }) {
   need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');
   const value = (o.cents / 100).toFixed(2); // shortcut: 2-decimal currencies only (USD/EUR/GBP offered in the UI)
   const d = await pp('/v2/checkout/orders', {
     intent: 'CAPTURE',
-    purchase_units: [{ custom_id: o.customId, description: o.description.slice(0, 127), amount: { currency_code: o.currency, value } }],
+    purchase_units: [{ custom_id: o.customId, description: o.description.slice(0, 127), amount: { currency_code: o.currency, value }, ...(o.payee && { payee: { email_address: o.payee } }) }],
   }, o.requestId);
   return d.id as string;
 }
@@ -179,7 +180,7 @@ const ensureIndex = () =>
         source: { type: 'text' }, status: { type: 'text' }, amount_cents: { type: 'long' }, date: { type: 'date' },
       },
     },
-  })));
+  })).catch((e) => { indexReady = null; throw e; })); // retry setup next time instead of caching the failure
 
 /** The indexer. Only searchable fields go in: no PayPal emails, order ids or notes. */
 export async function indexTxn(tripId: string, t: Txn, people: Pick<Person, 'name'>[]) {
