@@ -14,6 +14,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [opening, setOpening] = useState<string | null>(null); // product whose checkout is opening (a cloud browser takes a few seconds)
 
   const search = async (e: FormEvent) => {
     e.preventDefault();
@@ -31,12 +32,15 @@ export function Shop({ ctx }: { ctx: Ctx }) {
 
   const checkout = async (h: Hit) => {
     setError(null);
+    setOpening(h.id);
     try {
       if (session) await api(`/checkout/${session.session_id}`, { method: 'DELETE' });
       const s = await api<Session>('/checkout', { body: { url: h.offers[0].url } });
       setSession({ ...s, title: h.title });
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setOpening(null);
     }
   };
   const end = async () => {
@@ -73,7 +77,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
                 {best && (
                   <div className="row" style={{ gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
                     <a className="btn btn-outline" href={best.url} target="_blank" rel="noreferrer noopener">Open merchant</a>
-                    <button type="button" className="btn" onClick={() => checkout({ ...h, offers: [best] })}>Assisted checkout</button>
+                    <button type="button" className="btn btn-primary" disabled={opening === h.id} onClick={() => checkout({ ...h, offers: [best] })}>{opening === h.id ? 'Opening checkout…' : 'Checkout with PayPal'}</button>
                   </div>
                 )}
               </div>
@@ -86,14 +90,14 @@ export function Shop({ ctx }: { ctx: Ctx }) {
       {session && (
         <section className="card" aria-labelledby="ac-h">
           <div className="col">
-            <span className="eyebrow">Assisted checkout · Kernel cloud browser</span>
+            <span className="eyebrow">Checkout with PayPal · secure cloud browser</span>
             <h2 id="ac-h" style={{ fontSize: 18 }}>{session.title}</h2>
           </div>
           {session.live_view_url
             ? <iframe title="Live view of the merchant page" src={session.live_view_url} style={{ width: '100%', height: 520, border: '1px solid var(--line)', borderRadius: 12 }} allow="clipboard-read; clipboard-write" />
             : <p className="muted">The browser is open but has no live view URL.</p>}
           <p className="small" style={{ color: 'var(--body)', background: 'var(--gray-tint)', borderRadius: 10, padding: '10px 12px', lineHeight: 1.5 }}>
-            The assistant only opened the page. It never types passwords or card numbers and never presses the final Pay button — you do that in the live view. The session closes itself after 10 minutes.
+            This is the store’s own checkout. Choose PayPal there and approve the payment in the live view; you’re paying the store directly. We only opened the page: we never type passwords or card numbers and never press Pay for you. The session closes itself after 10 minutes.
           </p>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button type="button" className="btn" onClick={end}>End session</button>

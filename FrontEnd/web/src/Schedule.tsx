@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent, type Ref } from 'react';
-import { addDays, equalBps, largestRemainder, money, tripDays, type Trip, type Txn } from '../../shared/trip';
+import { equalBps, largestRemainder, money, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
 import { Chip, Icon, icons } from './ui';
 
@@ -16,7 +16,6 @@ const evtStyle = (t: Txn, c: string, tint: string) => {
 
 export function Schedule({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
-  const [view, setView] = useState<'timeline' | 'calendar'>('timeline');
   const [logDay, setLogDay] = useState(trip.window?.start ?? '');
   const dlg = useRef<HTMLDialogElement>(null);
   if (!trip.window) return <section className="card"><h2 style={{ fontSize: 20 }}>Schedule</h2><p className="muted">The schedule appears once the group confirms dates with Wayfinder.</p></section>;
@@ -31,14 +30,10 @@ export function Schedule({ ctx }: { ctx: Ctx }) {
           <span className="small muted">Every transaction, per person. Double-click your own row to log an expense.</span>
         </div>
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          <div role="group" aria-label="View" className="seg">
-            <button type="button" aria-pressed={view === 'timeline'} onClick={() => setView('timeline')}>Timeline</button>
-            <button type="button" aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}>Calendar</button>
-          </div>
           <button type="button" className="btn btn-primary" onClick={() => openLog(logDay || days[0])}><Icon d={icons.plus} />Log expense</button>
         </div>
       </div>
-      {view === 'timeline' ? <Timeline ctx={ctx} days={days} onLog={openLog} /> : <Calendar trip={trip} days={days} />}
+      <Timeline ctx={ctx} days={days} onLog={openLog} />
       <LogExpense ref={dlg} ctx={ctx} day={logDay} onDone={() => dlg.current?.close()} />
     </section>
   );
@@ -79,96 +74,24 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
                   const r = e.currentTarget.getBoundingClientRect();
                   onLog(days[Math.min(days.length - 1, Math.floor(((e.clientX - r.left) / r.width) * days.length))]);
                 } : undefined}>
-                {trip.txs.filter((t) => t.member === i && t.status !== 'failed').map((t) => (
-                  <span key={t.id} className="evt" style={{ ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }} title={`${t.vendor} · ${money(t.amount, trip.currency)} · ${t.status}`}>
-                    {t.vendor} · {money(t.amount, trip.currency)}{t.status === 'created' && ' · unpaid'}
-                  </span>
-                ))}
+                {trip.txs.filter((t) => t.member === i && t.status !== 'failed').map((t) => {
+                  const label = <>{t.vendor} · {money(t.amount, trip.currency)}{t.status === 'created' && ' · unpaid'}</>;
+                  const props = { className: 'evt', style: { ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }, title: `${t.vendor} · ${money(t.amount, trip.currency)} · ${t.status}` };
+                  // Payments (stays, in-store bills) open in Spending, where they're paid and tracked.
+                  return t.source === 'Prepaid share' || t.source === 'In-store'
+                    ? <a key={t.id} {...props} href={`#/trip/${trip.id}/spending`} style={{ ...props.style, textDecoration: 'none' }} title={`${props.title} · open in Spending`}>{label}</a>
+                    : <span key={t.id} {...props}>{label}</span>;
+                })}
               </div>
             </div>
           ))}
         </div>
       </div>
       <div className="row small muted" style={{ flexWrap: 'wrap', gap: 16 }}>
-        <span>Solid fill: paid prepaid share · dashed: collecting · outline: on-trip log or online purchase.</span>
+        <span>Solid fill: paid · dashed: not paid yet · outline: logged expense. Click a payment to open it in Spending.</span>
         <span>Other members’ rows are read-only.</span>
       </div>
     </>
-  );
-}
-
-/** Month grids covering the trip window, Sun-first. */
-function months(days: string[]) {
-  const firsts = [...new Set(days.map((d) => d.slice(0, 7)))];
-  return firsts.map((ym) => {
-    const first = `${ym}-01`;
-    const lead = new Date(first + 'T00:00:00Z').getUTCDay();
-    return { ym, cells: Array.from({ length: 42 }, (_, k) => addDays(first, k - lead)) };
-  });
-}
-
-export function Calendar({ trip, days }: { trip: Trip; days: string[] }) {
-  const [sel, setSel] = useState(days[0]);
-  const items = trip.txs.filter((t) => t.date === sel && t.status !== 'failed');
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'flex-start' }}>
-      <div style={{ flex: '3 1 560px', minWidth: 0 }} className="col">
-        {months(days).map(({ ym, cells }) => (
-          <div key={ym} className="col" style={{ gap: 8 }}>
-            <h3 style={{ fontSize: 18 }}>{new Date(ym + '-01T00:00:00Z').toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</h3>
-            <div className="cal" role="grid" aria-label={ym}>
-              {WEEK.map((w) => <span key={w} className="small muted" style={{ fontWeight: 600, padding: 4 }}>{w}</span>)}
-              {cells.map((d) => {
-                const inMonth = d.startsWith(ym);
-                const evs = inMonth ? trip.txs.filter((t) => t.date === d && t.status !== 'failed') : [];
-                const vendors = [...new Set(evs.map((t) => t.vendor))];
-                const leg = inMonth ? legOn(trip, d) : null;
-                return (
-                  <button key={d} type="button" className={inMonth ? '' : 'out'} disabled={!inMonth} aria-pressed={d === sel}
-                    aria-label={`${d}${evs.length ? `, ${evs.length} items` : ''}`} onClick={() => setSel(d)}>
-                    <span className="row" style={{ justifyContent: 'space-between', gap: 4 }}>
-                      <strong style={{ fontSize: 13 }}>{Number(d.slice(8))}</strong>
-                      {leg && <span className="muted" style={{ fontSize: 11 }}>{leg}</span>}
-                    </span>
-                    {vendors.map((v) => {
-                      const rows = evs.filter((t) => t.vendor === v);
-                      const who = new Set(rows.map((t) => t.member));
-                      return (
-                        <span key={v} className="tag" style={{ background: who.size > 1 ? 'var(--blue-tint)' : trip.members[rows[0].member].tint }}>
-                          {[...who].map((i) => trip.members[i].symbol).join('')} {v} · {money(rows.reduce((a, t) => a + t.amount, 0), trip.currency)}
-                        </span>
-                      );
-                    })}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-      <aside className="card" style={{ flex: '1 1 280px', background: 'var(--bg)', padding: 18 }}>
-        <div className="col">
-          <h3 style={{ fontSize: 18 }}>{short(sel)}</h3>
-          <span className="small muted">{legOn(trip, sel) ?? 'Travel day'} · {items.length} items</span>
-        </div>
-        {items.length === 0 && <p className="small muted">No transactions on this day.</p>}
-        {items.map((t) => {
-          const paid = t.source === 'Prepaid share' || t.source === 'In-store'; // payments open in Spending
-          const Tag = paid ? 'a' : 'div';
-          return (
-          <Tag key={t.id} {...(paid && { href: `#/trip/${trip.id}/spending`, title: 'Open in Spending' })} className="row"
-            style={{ alignItems: 'flex-start', textDecoration: 'none', color: 'inherit', borderRadius: 8, padding: paid ? 4 : 0, background: paid ? '#fff' : undefined }}>
-            <Chip p={trip.members[t.member]} size={28} />
-            <div className="col" style={{ flex: 1, minWidth: 0 }}>
-              <strong style={{ fontSize: 14 }}>{t.vendor}{t.source === 'Prepaid share' ? ` — ${trip.members[t.member].name}’s share` : ''}</strong>
-              <span className="small muted">{t.time} · {t.source} · {t.status}{t.paid_by !== t.member ? ` · paid by ${trip.members[t.paid_by].name}` : ''}</span>
-            </div>
-            <span className="mono small">{money(t.amount, trip.currency)}</span>
-          </Tag>
-          );
-        })}
-      </aside>
-    </div>
   );
 }
 

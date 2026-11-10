@@ -33,7 +33,7 @@ export class Rejected extends Error {}
 const reject = (msg: string): never => { throw new Rejected(msg); };
 
 export const OPENING =
-  "Hi everyone 👋 I'm Wayfinder. Where do you want to go? Drop cities, regions, or even a vibe (\"somewhere warm with good food\") — plus rough dates and budget if you have them.";
+  "Hi everyone 👋 I'm Wayfinder. Where do you want to go? Drop cities, regions, or even a vibe (\"somewhere warm with good food\"), plus rough dates and budget if you have them.";
 
 /** `user` is the creator's PayPal id; they become member 0. A solo trip never takes another member. */
 export function createTrip(name: string, currency: string, names: string[], user?: string, opts: { solo?: boolean; window?: Trip['window'] } = {}): Trip {

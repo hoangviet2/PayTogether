@@ -121,11 +121,6 @@ th.sticky { background: var(--bg); }
 .lane { position: relative; display: grid; align-content: center; gap: 4px; padding: 6px 0; }
 .evt { margin: 0 3px; border-radius: 8px; padding: 6px 8px; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1.5px solid; }
 .lane-me { cursor: copy; }
-.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
-.cal button { min-height: 96px; text-align: left; vertical-align: top; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 6px; display: flex; flex-direction: column; gap: 4px; color: var(--ink); overflow: hidden; }
-.cal button[aria-pressed='true'] { border: 2px solid var(--brand); }
-.cal button.out { background: var(--bg); color: #9aa0a8; }
-.cal .tag { font-size: 11px; border-radius: 4px; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 dialog { border: none; border-radius: 18px; padding: 24px; width: min(480px, calc(100vw - 32px)); color: var(--ink); }
 dialog::backdrop { background: rgba(1, 33, 105, 0.35); }

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as s from './store.ts';
-import { runTurn, toolsFor } from './wayfinder.ts';
+import { plainText, runTurn, toolsFor } from './wayfinder.ts';
 
 test('tool args are validated before running', async () => {
   const t = s.createTrip('Test', 'USD', ['Ana', 'Ben']);
@@ -24,4 +24,11 @@ test('a burst of triggers while a turn is queued becomes one turn, not a backlog
   await Promise.all([1, 2, 3, 4, 5].map((n) => runTurn(t, `edit ${n}`, () => {})));
   assert.equal(t.chat.length - before, 1);
   assert.equal(t.busy, false);
+});
+
+test('chat replies: paragraphs, no bullet points; ranges keep their dash', () => {
+  assert.equal(plainText('Stops for the trip:\n- Hanoi, 3 nights\n- Hue, 2 nights\nPress Confirm.'), 'Stops for the trip: Hanoi, 3 nights, Hue, 2 nights.\nPress Confirm.');
+  assert.equal(plainText('Options\n• Hotel A\n* Hotel B\n1. Hotel C'), 'Options: Hotel A, Hotel B, Hotel C.');
+  assert.equal(plainText('Da Lat — 2 nights - then Hue'), 'Da Lat, 2 nights, then Hue');
+  assert.equal(plainText('Nov 9–10, $10-$20, 5 – 7 nights, check-in'), 'Nov 9–10, $10-$20, 5 – 7 nights, check-in');
 });
