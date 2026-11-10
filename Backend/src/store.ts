@@ -14,7 +14,10 @@ const newCode = (): string => {
   const c = Array.from({ length: 6 }, () => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[randomInt(31)]).join('');
   return [...trips.values()].some((t) => t.code === c) ? newCode() : c;
 };
-for (const t of trips.values()) t.code ??= newCode(); // trips saved before join codes existed
+for (const t of trips.values()) {
+  t.code ??= newCode(); // trips saved before join codes existed
+  t.busy = false; // a Wayfinder turn cut off by a restart must not leave the chat stuck on "thinking"
+}
 // Everyone who has logged in, so a trip owner can invite an account by its PayPal email. Kept beside the trips file.
 const USERS_FILE = FILE.replace(/(\.json)?$/, '.users.json');
 export const users = new Map<string, { name: string; email: string | null }>(existsSync(USERS_FILE) ? Object.entries(JSON.parse(readFileSync(USERS_FILE, 'utf8'))) : []);

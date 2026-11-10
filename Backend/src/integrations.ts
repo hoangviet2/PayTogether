@@ -182,7 +182,7 @@ const ensureIndex = () =>
   })));
 
 /** The indexer. Only searchable fields go in: no PayPal emails, order ids or notes. */
-export async function indexTxn(tripId: string, t: Txn, people: Person[]) {
+export async function indexTxn(tripId: string, t: Txn, people: Pick<Person, 'name'>[]) {
   if (!es) return;
   await ensureIndex();
   await es.index({

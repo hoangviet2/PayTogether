@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { PHASES, balances, searchTxns, settle, validateTimeline, type Phase, type Trip } from '../../FrontEnd/shared/trip.ts';
 import * as store from './store.ts';
 import { searchProducts, searchTxnIds } from './integrations.ts';
+import * as workflows from './workflows.ts';
 
 // Created on first use: the SDK throws without a key, and the server must still boot (chat then says it is offline).
 let client: OpenAI | undefined;
@@ -173,6 +174,38 @@ Phase playbook:
 
 const queue = new Map<string, Promise<void>>();
 
+/** What the model needs for one turn: instructions, the tools this phase allows, and the chat so far. */
+export type TurnContext = { instructions: string; tools: (FunctionTool | WebSearchTool)[]; input: string };
+export function turnContext(t: Trip, trigger: string): TurnContext {
+  const { tools, web } = toolsFor(t);
+  return { instructions: system(t), tools: [...tools.map((x) => x.def), ...web], input: `Recent group chat, oldest first:\n${transcript(t)}\n\nWhat just happened: ${trigger}` };
+}
+
+/** Runs one tool call against the live trip. */
+export async function runTool(t: Trip, name: string, args: string) {
+  return (await toolsFor(t).tools.find((x) => x.def.name === name)?.run(args)) ?? `Error: no tool named ${name} in this phase.`;
+}
+
+/** The tool loop, shared by the API and the workflow task (src/tasks.ts): every function call goes through exec,
+ * results go back to the model, and it stops when the model answers in text. Returns the reply ('' for none). */
+export async function modelLoop(ctx: TurnContext, exec: (name: string, args: string) => Promise<string>): Promise<string> {
+  let input: string | ResponseInputItem[] = ctx.input;
+  let previous: string | undefined;
+  for (let i = 0; i < 20; i++) {
+    const r: Response = await ai().responses.create({
+      model: CHAT_MODEL, reasoning: { effort: 'medium' }, instructions: ctx.instructions, tools: ctx.tools, input, previous_response_id: previous,
+    });
+    const calls = r.output.filter((o): o is ResponseFunctionToolCall => o.type === 'function_call');
+    if (!calls.length) {
+      const refused = r.output.some((o) => o.type === 'message' && o.content.some((c) => c.type === 'refusal'));
+      return refused ? "I can't help with that one. Ask me about the trip plan, places or spending." : r.output_text.trim();
+    }
+    previous = r.id;
+    input = await Promise.all(calls.map(async (c) => ({ type: 'function_call_output' as const, call_id: c.call_id, output: await exec(c.name, c.arguments) })));
+  }
+  return 'That took too many steps. Try asking in a simpler way.';
+}
+
 /** Runs one Wayfinder turn for a chat message or event. Turns for one trip run one at a time. */
 export function runTurn(t: Trip, trigger: string, onChange: () => void) {
   const next = (queue.get(t.id) ?? Promise.resolve()).then(() => turn(t, trigger, onChange));
@@ -184,35 +217,11 @@ async function turn(t: Trip, trigger: string, onChange: () => void) {
   t.busy = true;
   onChange();
   try {
-    const { tools, web } = toolsFor(t);
-    const byName = new Map(tools.map((x) => [x.def.name, x]));
-    let input: string | ResponseInputItem[] = `Recent group chat, oldest first:\n${transcript(t)}\n\nWhat just happened: ${trigger}`;
-    let previous: string | undefined;
-    // Tool loop: run every function call, send the results back, stop when the model answers in text.
-    for (let i = 0; i < 20; i++) {
-      const r: Response = await ai().responses.create({
-        model: CHAT_MODEL,
-        reasoning: { effort: 'medium' },
-        instructions: system(t),
-        tools: [...tools.map((x) => x.def), ...web],
-        input,
-        previous_response_id: previous,
-      });
-      const calls = r.output.filter((o): o is ResponseFunctionToolCall => o.type === 'function_call');
-      if (!calls.length) {
-        const refused = r.output.some((o) => o.type === 'message' && o.content.some((c) => c.type === 'refusal'));
-        if (refused) store.say(t, 'ai', "I can't help with that one. Ask me about the trip plan, places or spending.");
-        else if (r.output_text.trim()) store.say(t, 'ai', r.output_text.trim());
-        return;
-      }
-      previous = r.id;
-      input = await Promise.all(calls.map(async (c) => ({
-        type: 'function_call_output' as const,
-        call_id: c.call_id,
-        output: (await byName.get(c.name)?.run(c.arguments)) ?? `Error: no tool named ${c.name} in this phase.`,
-      })));
-    }
-    store.say(t, 'ai', 'That took too many steps. Try asking in a simpler way.');
+    // With Render Workflows on, the loop runs on its own instance and calls back for each tool (/api/internal).
+    const reply = workflows.enabled
+      ? await workflows.run<string>('wayfinder-turn', [t.id, trigger])
+      : await modelLoop(turnContext(t, trigger), (name, args) => runTool(t, name, args));
+    if (reply) store.say(t, 'ai', reply);
   } catch (e) {
     console.error('Wayfinder turn failed:', e);
     store.say(t, 'ai', e instanceof OpenAI.AuthenticationError

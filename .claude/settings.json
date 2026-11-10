@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {
     "frontend-design@anthropic-plugin-directory": true,
-    "ponytail@ponytail": true
+    "ponytail@ponytail": true,
+    "render@anthropic-plugin-directory": true
   }
 }

@@ -1,6 +1,7 @@
-# Render Blueprint: two services, deployed separately.
-#   paytogether-api  Backend/ (API only, /api/*)
-#   paytogether-web  FrontEnd/web as a static site; it calls the API cross-origin (VITE_API_URL ↔ WEB_ORIGIN).
+# Render Blueprint: three services, deployed separately.
+#   paytogether-api        Backend/ (API only, /api/*)
+#   paytogether-web        FrontEnd/web as a static site; it calls the API cross-origin (VITE_API_URL ↔ WEB_ORIGIN).
+#   paytogether-workflows  Render Workflows (Backend/src/tasks.ts): Wayfinder turns, PayPal orders, Elastic indexing.
 # No rootDir on either: both import FrontEnd/shared/trip.ts, and Render hides files outside a rootDir.
 services:
   - type: web
@@ -29,6 +30,10 @@ services:
         generateValue: true
       - key: WEB_ORIGIN # the web service's URL, e.g. https://paytogether-web.onrender.com (CORS allow-list)
         sync: false
+      - key: RENDER_API_KEY # Account Settings → API Keys. Turns on Render Workflows; unset, the API runs those jobs itself
+        sync: false
+      - key: RENDER_WORKFLOW_SLUG # the workflow's slug, from its Definitions page
+        value: paytogether-workflows
       - key: SESSION_SECRET # signs Log in with PayPal sessions; changing it logs everyone out
         generateValue: true
       - key: PAYPAL_ENV
@@ -63,3 +68,30 @@ services:
     envVars:
       - key: VITE_API_URL # the API service's URL, e.g. https://paytogether-api.onrender.com (baked in at build time)
         sync: false
+
+  - type: workflow
+    name: paytogether-workflows
+    runtime: node
+    region: oregon # must match paytogether-api's region: tasks call it over the private network
+    buildCommand: cd Backend && npm ci
+    startCommand: cd Backend && node src/tasks.ts
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_HOSTPORT # paytogether-api on the private network, for Wayfinder's tool callbacks (/api/internal)
+        fromService: { type: web, name: paytogether-api, property: hostport }
+      # Copied from paytogether-api so keys are entered once.
+      - key: ACCESS_TOKEN
+        fromService: { type: web, name: paytogether-api, envVarKey: ACCESS_TOKEN }
+      - key: OPENAI_API_KEY
+        fromService: { type: web, name: paytogether-api, envVarKey: OPENAI_API_KEY }
+      - key: PAYPAL_ENV
+        fromService: { type: web, name: paytogether-api, envVarKey: PAYPAL_ENV }
+      - key: PAYPAL_CLIENT_ID
+        fromService: { type: web, name: paytogether-api, envVarKey: PAYPAL_CLIENT_ID }
+      - key: PAYPAL_CLIENT_SECRET
+        fromService: { type: web, name: paytogether-api, envVarKey: PAYPAL_CLIENT_SECRET }
+      - key: ELASTIC_URL
+        fromService: { type: web, name: paytogether-api, envVarKey: ELASTIC_URL }
+      - key: ELASTIC_API_KEY
+        fromService: { type: web, name: paytogether-api, envVarKey: ELASTIC_API_KEY }

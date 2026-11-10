@@ -12,6 +12,7 @@
     "@channel3/sdk": "^4.8.0",
     "@elastic/elasticsearch": "^9.5.1",
     "@onkernel/sdk": "^0.143.0",
+    "@renderinc/sdk": "~1.7.0",
     "openai": "^7.53.0",
     "zod": "^4.6.7"
   },

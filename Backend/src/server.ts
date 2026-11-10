@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { mySummary, searchTxns, shareAmounts, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
 import * as store from './store.ts';
 import * as ext from './integrations.ts';
-import { runTurn, shouldReply } from './wayfinder.ts';
+import { runTool, runTurn, shouldReply, turnContext } from './wayfinder.ts';
+import * as workflows from './workflows.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN; // set on any public host; the web dev proxy sends it (FrontEnd/web/vite.config.ts)
@@ -22,7 +23,12 @@ class HttpError extends Error {
 }
 
 const persist = () => store.save();
-const reindex = (t: Trip, rows: Txn[]) => rows.forEach((r) => ext.indexTxn(t.id, r, t.members).catch((e) => console.error('Elastic index failed:', e.message)));
+const reindex = (t: Trip, rows: Txn[]) => {
+  if (!ext.ready.elastic || !rows.length) return;
+  const people = t.members.map(({ name }) => ({ name })); // names only: workflow inputs are stored by Render for 30 days
+  if (workflows.enabled) return void workflows.start('index-txns', [t.id, rows, people]).catch((e) => console.error('index-txns start failed:', e.message));
+  rows.forEach((r) => ext.indexTxn(t.id, r, people).catch((e) => console.error('Elastic index failed:', e.message)));
+};
 const OFFLINE = 'I am offline: set OPENAI_API_KEY in Backend/.env and restart the server.';
 const wayfinder = (t: Trip, trigger: string | null) => {
   if (!trigger) return;
@@ -112,6 +118,23 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (!i.start !== !i.end) throw new HttpError(400, 'Give both a start and an end date, or neither.');
     const window = i.start && i.end ? { start: i.start, end: i.end } : null;
     return send(store.createTrip(i.name, i.currency, [u.name], u.user, { solo: i.solo, window }), 201); // friends join with the trip's code
+  }
+
+  // Callbacks from the paytogether-workflows service (src/tasks.ts). Need the access token itself: a user session is not enough.
+  if (a === 'internal') {
+    if (!ACCESS_TOKEN || !safeEqual(String(req.headers['x-access-token'] ?? ''), ACCESS_TOKEN)) throw new HttpError(403, 'Internal route');
+    const t = b === 'trips' && c ? tripOr404(c) : null;
+    if (t && d === 'context' && is('POST', 5)) {
+      const { trigger } = await body(req, z.object({ trigger: z.string().max(5000) }));
+      return send(turnContext(t, trigger));
+    }
+    if (t && d === 'tool' && is('POST', 5)) {
+      const { name: tool, args } = await body(req, z.object({ name: z.string().max(100), args: z.string().max(50_000) }));
+      const output = await runTool(t, tool, args);
+      persist();
+      return send({ output });
+    }
+    throw new HttpError(404, 'Not found');
   }
 
   if (a === 'invites' && is('GET', 2)) {
@@ -242,10 +265,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 async function sendOrders(t: Trip, previewId: string) {
   const p = t.previews.find((x) => x.id === previewId)!;
   const cents = shareAmounts(p)!;
-  const ids = await Promise.all(p.shares.map((s, i) => ext.createOrder({
+  const orders = p.shares.map((s, i) => ({
     requestId: `${p.id}-${s.ratio_bp}-${i}`, customId: `${t.id}:${p.id}:${i}`, cents: cents[i], currency: p.currency,
     description: `${t.name} · ${p.title} · ${t.members[i].name}'s share`,
-  })));
+  }));
+  const ids = workflows.enabled ? await workflows.run<string[]>('paypal-orders', [orders]) : await Promise.all(orders.map(ext.createOrder));
   const rows = store.ordersCreated(t, p, ids);
   reindex(t, rows);
   store.say(t, 'ai', 'Each of you has a payment request for your share — tap Pay my share.');
