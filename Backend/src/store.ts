@@ -1,5 +1,5 @@
 // Trip state and every rule-bearing mutation. Pure-ish: no network; callers run side effects (PayPal, Elastic, Wayfinder).
-// shortcut: one JSON file instead of Postgres + Prisma; move to the claudee.md stack before more than one server runs.
+// shortcut: one JSON file instead of Postgres + Prisma; move to a real database before more than one server runs.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomInt, randomUUID } from 'node:crypto';
 import {
@@ -165,7 +165,7 @@ export const dropPreview = (t: Trip, previewId: string) => { t.previews = t.prev
 
 export const say = (t: Trip, from: number | 'ai', text: string) => t.chat.push({ from, at: now(), text });
 
-// ---------- confirm / phases (ai.md §2: any member proposes, all members must accept) ----------
+// ---------- confirm / phases (CLAUDE.md Wayfinder rules: any member proposes, all members must accept) ----------
 export function confirm(t: Trip, m: number): string | null {
   const blocker = confirmBlocker(t);
   if (blocker) reject(blocker);
@@ -248,7 +248,7 @@ export function vote(t: Trip, pollId: string, optionId: string | null, m: number
   return pollTally(p).voted === t.members.length ? closePoll(t, pollId) : null;
 }
 
-/** Closes on a single leader. On a tie the poll stays open and Wayfinder asks; it never breaks ties (ai.md §2.3). */
+/** Closes on a single leader. On a tie the poll stays open and Wayfinder asks; it never breaks ties (CLAUDE.md Wayfinder rules). */
 export function closePoll(t: Trip, pollId: string): string {
   const p = openPoll(t, pollId);
   const { leaders, votes } = pollTally(p);

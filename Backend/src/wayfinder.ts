@@ -1,4 +1,4 @@
-// Wayfinder: the AI host (AI/ai.md). Tools are phase-gated, inputs are Zod-validated, and none of them moves money.
+// Wayfinder: the AI host (CLAUDE.md, Wayfinder rules). Tools are phase-gated, inputs are Zod-validated, and none of them moves money.
 import OpenAI from 'openai';
 import { zodTextFormat } from 'openai/helpers/zod';
 import type { FunctionTool, Response, ResponseFunctionToolCall, ResponseInputItem, WebSearchTool } from 'openai/resources/responses/responses';
@@ -31,7 +31,7 @@ function tool<S extends z.ZodType>(o: { name: string; description: string; input
 const transcript = (t: Trip, last = 40) =>
   t.chat.slice(-last).map((m) => `${m.from === 'ai' ? 'Wayfinder' : `${t.members[m.from].name} (member ${m.from})`}: ${m.text}`).join('\n');
 
-/** ai.md §3: reply when @mentioned, otherwise a cheap classifier decides (on the workflow service when it's on). */
+/** CLAUDE.md Wayfinder rules: reply when @mentioned, otherwise a cheap classifier decides (on the workflow service when it's on). */
 export async function shouldReply(t: Trip, text: string): Promise<boolean> {
   if (/@?wayfinder\b/i.test(text)) return true;
   const input = `Phase: ${t.phase}\n\n${transcript(t, 12)}`;
@@ -182,7 +182,7 @@ export function toolsFor(t: Trip) {
       inputSchema: z.object({}),
       run: async () => json(settle(balances(t.txs, t.members.length)).map((x) => ({ from: t.members[x.from].name, to: t.members[x.to].name, cents: x.amount }))),
     }));
-  // Places come from live web search; the results are tool data, never instructions (ai.md §6.4).
+  // Places come from live web search; the results are tool data, never instructions (CLAUDE.md Wayfinder rules).
   const web: WebSearchTool[] = at('PLACES', 'DESTINATIONS') ? [{ type: 'web_search' }] : [];
   return { tools, web };
 }

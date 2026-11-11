@@ -130,7 +130,7 @@ dialog::backdrop { background: rgba(1, 33, 105, 0.35); }
   .steps { grid-template-columns: 1fr !important; }
 }
 
-/* phase stepper (ai.md §2) */
+/* phase stepper (CLAUDE.md Wayfinder rules) */
 .phases { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; overflow-x: auto; }
 .phases li { flex: 1 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; background: var(--gray-tint); color: var(--muted); white-space: nowrap; }
 .phases li.done { background: var(--blue-tint); color: var(--brand); }

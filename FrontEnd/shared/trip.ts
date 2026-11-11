@@ -1,5 +1,5 @@
 // Shared trip data + pure money logic for web and mobile. No imports, so Vite, Metro and `node --test` all load it as-is.
-// Money is integer cents; ratios are basis points summing to 10000 (claudee.md invariants 1–2).
+// Money is integer cents; ratios are basis points summing to 10000 (CLAUDE.md invariants 1–2).
 // shortcut: sample data stands in for the Backend API, replace with fetches once Backend exists.
 
 export type Member = { id: string; name: string; symbol: string; color: string; tint: string; me?: boolean };
@@ -223,10 +223,10 @@ export function mayGrid() {
   });
 }
 
-// ---------- Wayfinder (client stand-in for the server-side Claude turn, ai.md §3 and §6) ----------
+// ---------- Wayfinder (client stand-in for the server-side Wayfinder turn, CLAUDE.md Wayfinder rules) ----------
 
 /**
- * Reply text, or null to stay silent. Speaks only when @mentioned (ai.md §3); never moves money or edits splits (§6.1–2);
+ * Reply text, or null to stay silent. Speaks only when @mentioned (CLAUDE.md Wayfinder rules); never moves money or edits splits (§6.1–2);
  * every amount comes from trip data, never invented (§6.6).
  * shortcut: keyword routing instead of Claude + tools; replace with a Backend call once the API exists (the key can't ship in clients).
  */
@@ -253,7 +253,7 @@ export function wayfinderReply(text: string, txs: Tx[], vote: string | null): st
 }
 
 // ========== Live trip model (web + Backend) ==========
-// A first-time trip starts empty and walks the ai.md §2 phases. Backend owns the state; the web renders it.
+// A first-time trip starts empty and walks the CLAUDE.md Wayfinder rules phases. Backend owns the state; the web renders it.
 
 export type Phase = 'DESTINATIONS' | 'TIMELINE' | 'PLACES' | 'PRICING' | 'BOOKED' | 'ON_TRIP' | 'SETTLED';
 export const PHASES: Phase[] = ['DESTINATIONS', 'TIMELINE', 'PLACES', 'PRICING', 'BOOKED', 'ON_TRIP', 'SETTLED'];
@@ -325,7 +325,7 @@ export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) -
 /** Every day of the trip window, start to end. */
 export const tripDays = (t: Pick<Trip, 'window'>) => (t.window ? Array.from({ length: daysBetween(t.window.start, t.window.end) + 1 }, (_, k) => addDays(t.window!.start, k)) : []);
 
-/** ai.md §2.2: contiguous legs, depart = arrive + nights, total nights fit the window exactly. */
+/** CLAUDE.md Wayfinder rules: contiguous legs, depart = arrive + nights, total nights fit the window exactly. */
 export function validateTimeline(legs: Leg[], window: Trip['window']): string[] {
   const errs: string[] = [];
   if (!legs.length) return ['No legs yet.'];
@@ -466,7 +466,7 @@ export function mySummary(t: Trip, m: number) {
   };
 }
 
-/** Why the group can't press Confirm yet, or null when it can (ai.md §2). */
+/** Why the group can't press Confirm yet, or null when it can (CLAUDE.md Wayfinder rules). */
 export function confirmBlocker(t: Trip): string | null {
   if (!t.solo && t.members.length < 2) return 'A group trip needs at least one more person. Share the join code or invite them by email.';
   switch (t.phase) {

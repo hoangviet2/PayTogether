@@ -1,4 +1,4 @@
-// Run: npm test (from Backend/). Store rules from ai.md §2 and claudee.md invariants.
+// Run: npm test (from Backend/). Store rules from the CLAUDE.md invariants and Wayfinder rules.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as s from './store.ts';

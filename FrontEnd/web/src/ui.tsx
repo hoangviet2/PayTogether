@@ -127,7 +127,7 @@ export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
 // The Plan tab shows the planning steps only; Pricing onward happens in Spending.
 const PLAN = PHASES.slice(0, PHASES.indexOf('PRICING'));
 
-/** ai.md §2 state machine: where the group is, and the Confirm that moves it on (all members must confirm). */
+/** CLAUDE.md Wayfinder rules state machine: where the group is, and the Confirm that moves it on (all members must confirm). */
 export function PhaseBar({ ctx }: { ctx: Ctx }) {
   const { trip, me, act } = ctx;
   const at = PHASES.indexOf(trip.phase);
@@ -227,7 +227,7 @@ export const editPct = (pcts: string[], i: number, v: string) => {
 
 const STATUS: Record<Share['status'], string> = { none: '', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
 
-/** Price preview with split bars. Each member moves only their own bar; ratios must reach exactly 100% (ai.md §2.4). */
+/** Price preview with split bars. Each member moves only their own bar; ratios must reach exactly 100% (CLAUDE.md Wayfinder rules). */
 export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
   const { trip, me, act } = ctx;
   const cents = shareAmounts(p);
