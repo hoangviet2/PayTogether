@@ -46,7 +46,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const [paying, setPaying] = useState<Row | null>(null);
   const [paidMsg, setPaidMsg] = useState<string | null>(null);
 
-  const rows = useMemo<Row[]>(() => trip.previews.flatMap((p) => {
+  const rows = useMemo<Row[]>(() => trip.previews.filter((p) => p.paid_by == null).flatMap((p) => { // already-paid expenses have nothing to pay
     const cents = shareAmounts(p);
     return p.shares.flatMap((s, i) => (!s.ratio_bp || s.status === 'captured' || (!s.accepted && !p.frozen) ? [] : [{ // paid: moves to the Spending grid
       id: `${p.id}-${i}`, previewId: p.id, bill: p.title, kind: KIND[p.kind], member: i, memberName: trip.members[i].name, isMe: i === me,
@@ -144,7 +144,6 @@ export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
                   onChange={(e) => setPcts((p) => editPct(p, i, e.target.value))} />%
               </label>
             ))}
-            <button type="button" className="btn" onClick={() => setPcts(trip.members.map((_, i) => (i === me ? '100' : '0')))}>I’ll pay 100%</button>
           </div>
           {sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {pct(sum)}; they need to total 100%.</p>}
         </fieldset>

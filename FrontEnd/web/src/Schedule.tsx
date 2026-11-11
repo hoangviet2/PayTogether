@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type Ref } from 'react';
-import { equalBps, largestRemainder, money, payStage, tripDays, type Trip, type Txn } from '../../shared/trip';
+import { money, payStage, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
-import { Chip, editPct, Icon, icons } from './ui';
+import { Chip, Icon, icons } from './ui';
 
 const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const weekday = (iso: string) => WEEK[new Date(iso + 'T00:00:00Z').getUTCDay()];
@@ -93,30 +93,27 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
   );
 }
 
+/** Log expense: the details only. Saving makes a bill in Split bills (Spending), where everyone sets their own share. */
 function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElement>; ctx: Ctx; day: string; days: string[]; onDone: () => void }) {
-  const { trip, me, act } = ctx;
+  const { trip, act } = ctx;
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(day);
   const [seenDay, setSeenDay] = useState(day);
   if (day !== seenDay) { setSeenDay(day); setDate(day); } // a double-click on another day opens the dialog on that day
   const [paid, setPaid] = useState(true);
-  const [pcts, setPcts] = useState(() => equalBps(trip.members.length).map((b) => String(b / 100)));
   const cents = Math.round(parseFloat(amount) * 100);
   const valid = Number.isFinite(cents) && cents > 0;
-  const bps = trip.solo ? trip.members.map((_, i) => (i === me ? 10000 : 0)) : pcts.map((v) => Math.round((parseFloat(v) || 0) * 100));
-  const sum = bps.reduce((a, b) => a + b, 0);
-  const shares = valid && sum === 10000 ? largestRemainder(cents, bps) : null;
-  const setAll = (f: (i: number) => string) => setPcts(trip.members.map((_, i) => f(i)));
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!valid || sum !== 10000) return;
+    if (!valid) return;
     const form = e.currentTarget;
     const f = new FormData(form);
-    await act('/txns', { date, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, bps, paid });
+    await act('/txns', { date, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, paid });
     form.reset();
     setAmount('');
     onDone();
+    location.hash = `#/trip/${trip.id}/spending`; // Split bills is at the top of Spending
   };
 
   return (
@@ -141,30 +138,14 @@ function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElemen
           </label>
           <label className="field" style={{ flex: '1 1 140px' }}>Amount ({trip.currency})<input name="amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} pattern="\d+(\.\d{1,2})?" /></label>
         </div>
-        {!trip.solo && <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
-          <legend className="field" style={{ marginBottom: 6 }}>Split (0% = not on it)</legend>
-          <div className="row" style={{ gap: 8 }}>
-            <button type="button" className="btn" onClick={() => setAll((i) => (i === me ? '100' : '0'))}>Me 100%</button>
-            <button type="button" className="btn" onClick={() => { const eq = equalBps(trip.members.length); setAll((i) => String(eq[i] / 100)); }}>Equal</button>
-          </div>
-          <div className="col" style={{ gap: 6 }}>
-            {trip.members.map((m, i) => (
-              <label key={i} className="row" style={{ gap: 8, fontSize: 14, minHeight: 44 }}>
-                <Chip p={m} size={24} /><span style={{ flex: 1 }}>{m.name}{i === me ? ' (you)' : ''}</span>
-                <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
-                  onChange={(e) => setPcts((p) => editPct(p, i, e.target.value))} />%
-                <span className="mono" style={{ minWidth: 80, textAlign: 'right' }}>{shares ? money(shares[i], trip.currency) : '—'}</span>
-              </label>
-            ))}
-          </div>
-          {sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {(sum / 100).toFixed(2)}%; they need to total 100%.</p>}
-        </fieldset>}
-        <span className="small muted">{paid
-          ? 'You paid. It goes straight to Spending; the others owe you their share (see Dashboard → settle up).'
-          : `It goes to Split bills on Spending. ${trip.solo ? 'Accept it' : 'Everyone on it accepts (not needed if you take 100%)'}, then each pays their share in advance with PayPal.`}</span>
+        <span className="small muted">{trip.solo
+          ? (paid ? 'It goes straight to Spending.' : 'It goes to Payments due on Spending, to pay in advance with PayPal.')
+          : `Next, it opens in Split bills on Spending, starting equal; everyone sets their own share there and accepts. ${paid
+            ? 'Once everyone accepts it goes to the Spending list; the others owe you their share.'
+            : 'Once everyone accepts, each pays their share in advance with PayPal.'}`}</span>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" onClick={onDone}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={!valid || sum !== 10000}>{paid ? 'Save expense' : 'Add to bills'}</button>
+          <button type="submit" className="btn btn-primary" disabled={!valid}>{trip.solo ? 'Save expense' : 'Continue to split bill'}</button>
         </div>
       </form>
     </dialog>

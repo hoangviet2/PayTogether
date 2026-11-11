@@ -413,18 +413,29 @@ export function logExpense(t: Trip, m: number, e: { date: string; time: string; 
   return rows;
 }
 
-/** Planned expense from the schedule: not paid yet, so it's a prepaid bill with the logger's split. Everyone on it
- * accepts (unless the logger takes 100%), then each pays their share in advance through PayPal. */
-export function createPlannedBill(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; bps: number[] }): Preview {
-  if (e.bps.length !== t.members.length || e.bps.reduce((a, b) => a + b, 0) !== 10000) reject('Split must cover every member and total 100%.');
-  const all = e.bps[m] === 10000;
+/** Log expense from the schedule: always a bill in Split bills, starting equal, where each member sets their own share.
+ * paid: the logger already paid, so once everyone accepts it becomes transactions owed to them (recordPaidBill).
+ * Not paid: a prepaid bill, so once everyone accepts each pays their share in advance through PayPal. */
+export function createLoggedBill(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; paid: boolean }): Preview {
+  if (t.phase === 'SETTLED') reject('This trip is settled.');
+  const solo = t.members.length === 1;
   const p: Preview = {
-    id: id(), option_id: '', kind: 'plan', title: e.vendor, meta: `Planned · ${e.date} ${e.time} · added by ${t.members[m].name}`, category: e.type,
-    date: e.date, time: e.time, total_cents: e.total, currency: t.currency, prepaid: true, frozen: false, is_estimate: true,
-    shares: e.bps.map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: all || !ratio_bp, status: 'none' as const })),
+    id: id(), option_id: '', kind: 'plan', title: e.vendor, category: e.type, date: e.date, time: e.time,
+    meta: `${e.paid ? `Paid by ${t.members[m].name}` : 'Planned'} · ${e.date} ${e.time}`,
+    total_cents: e.total, currency: t.currency, prepaid: !e.paid, frozen: false, is_estimate: true, ...(e.paid && { paid_by: m }),
+    shares: equalBps(t.members.length).map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: solo || i === m, status: 'none' as const })),
   };
   t.previews.push(p);
   return p;
+}
+
+/** A paid logged expense everyone accepted: its shares become transactions paid by the logger, and the bill goes away. */
+export function recordPaidBill(t: Trip, previewId: string): Txn[] | null {
+  const p = t.previews.find((x) => x.id === previewId);
+  if (!p || p.paid_by == null || !p.shares.every((s) => s.accepted)) return null;
+  const rows = logExpense(t, p.paid_by, { date: p.date!, time: p.time!, vendor: p.title, type: p.category ?? 'Other', total: p.total_cents, bps: p.shares.map((s) => s.ratio_bp) });
+  dropPreview(t, p.id);
+  return rows;
 }
 
 /** What Wayfinder sees: no chat (it gets that separately) and no PayPal order ids. */

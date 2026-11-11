@@ -239,7 +239,7 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
     <section aria-label={`${p.title} split`} className="card" style={{ padding: 18 }}>
       <div className="between">
         <div className="col" style={{ gap: 3 }}>
-          <span className="eyebrow" style={{ fontSize: 11 }}>{p.kind === 'store' ? `In-store · pays ${p.payee?.email}` : p.kind === 'plan' ? `Planned ${p.category?.toLowerCase() ?? 'expense'} · prepaid` : `${p.kind === 'stay' ? 'Stay' : 'Dining'} · ${p.prepaid ? 'prepaid' : 'pay there'}`}</span>
+          <span className="eyebrow" style={{ fontSize: 11 }}>{p.kind === 'store' ? `In-store · pays ${p.payee?.email}` : p.kind === 'plan' ? (p.paid_by != null ? `${p.category ?? 'Expense'} · already paid by ${trip.members[p.paid_by]?.name}` : `Planned ${p.category?.toLowerCase() ?? 'expense'} · prepaid`) : `${p.kind === 'stay' ? 'Stay' : 'Dining'} · ${p.prepaid ? 'prepaid' : 'pay there'}`}</span>
           <span style={{ fontFamily: 'var(--display)', fontWeight: 600, fontSize: 20 }}>{p.title}</span>
           <span className="small muted">{p.meta}</span>
         </div>

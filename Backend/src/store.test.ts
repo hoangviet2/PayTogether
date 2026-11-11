@@ -178,14 +178,24 @@ test('taking 100% needs nobody else; store bills take a custom split', () => {
   assert.throws(() => s.createStoreBill(t, 0, { vendor: 'X', email: 'x@x.com', total: 1, category: 'Store', members: [], bps: [5000, 4000, 0] }), /100%/);
 });
 
-test('planned expense: a prepaid bill on its own date; 100% for the logger skips the others', () => {
+test('log expense: a split bill either way; paid becomes transactions, planned gets PayPal orders on its date', () => {
   const t = s.createTrip('Plan', 'USD', ['Ana', 'Ben']);
   const e = { date: '2027-05-20', time: '19:30', vendor: 'Ferry', type: 'Transport', total: 3000 };
-  const p = s.createPlannedBill(t, 0, { ...e, bps: [6000, 4000] });
-  assert.equal(s.readyToCharge(p), false);
-  assert.equal(s.createPlannedBill(t, 0, { ...e, bps: [10000, 0] }).shares.every((x) => x.accepted), true);
-  const rows = s.ordersCreated(t, p, ['o1', 'o2']);
-  assert.deepEqual(rows.map((r) => [r.date, r.time, r.amount, r.source]), [['2027-05-20', '19:30', 1800, 'Prepaid share'], ['2027-05-20', '19:30', 1200, 'Prepaid share']]);
+  const planned = s.createLoggedBill(t, 0, { ...e, paid: false });
+  assert.deepEqual(planned.shares.map((x) => [x.ratio_bp, x.accepted]), [[5000, true], [5000, false]]);
+  s.setRatio(t, planned.id, 1, 4000);
+  s.accept(t, planned.id, 0);
+  assert.equal(s.accept(t, planned.id, 1), true);
+  const orders = s.ordersCreated(t, planned, ['o1', 'o2']);
+  assert.deepEqual(orders.map((r) => [r.date, r.time, r.amount, r.source]), [['2027-05-20', '19:30', 1800, 'Prepaid share'], ['2027-05-20', '19:30', 1200, 'Prepaid share']]);
+
+  const paid = s.createLoggedBill(t, 1, { ...e, paid: true });
+  assert.equal(s.readyToCharge(paid), false); // nothing to charge
+  assert.equal(s.recordPaidBill(t, paid.id), null); // Ana hasn't accepted
+  s.accept(t, paid.id, 0);
+  const rows = s.recordPaidBill(t, paid.id)!;
+  assert.deepEqual(rows.map((r) => [r.member, r.paid_by, r.amount, r.status]), [[0, 1, 1500, 'logged'], [1, 1, 1500, 'logged']]);
+  assert.equal(t.previews.some((p) => p.id === paid.id), false);
 });
 
 test('delete trip: owner only, never once PayPal requests exist', () => {

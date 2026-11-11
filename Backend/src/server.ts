@@ -224,10 +224,11 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (e === 'ratio' && is('POST', 6)) {
         const { bp } = await body(req, z.object({ bp: z.number().int().min(0).max(10000) }));
         wayfinder(t, store.setRatio(t, d, m, bp));
-        if (store.readyToCharge(t.previews.find((x) => x.id === d)!)) await sendOrders(t, d); // someone took 100%
+        await settleIfReady(t, d); // someone took 100%
       } else if (e === 'equal' && is('POST', 6)) store.resetEqual(t, d, m);
       else if (e === 'accept' && is('POST', 6)) {
-        if (store.accept(t, d, m)) await sendOrders(t, d);
+        store.accept(t, d, m);
+        await settleIfReady(t, d);
       } else if (e === 'pay' && is('POST', 6)) {
         // Called each time someone opens PayPal: bills can sit for days and PayPal drops unapproved orders, so swap in a fresh one.
         const p = t.previews.find((x) => x.id === d);
@@ -281,15 +282,16 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (c === 'txns' && is('POST', 4)) {
       const i = await body(req, z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/), vendor: name, type: name,
-        total: z.number().int().positive().max(100_000_00), bps: z.array(z.number().int().min(0).max(10000)), paid: z.boolean().default(true), store: z.boolean().default(false),
+        total: z.number().int().positive().max(100_000_00), bps: z.array(z.number().int().min(0).max(10000)).optional(), paid: z.boolean().default(true), store: z.boolean().default(false),
       }));
-      if (!i.paid) { // just planned: a bill in Split bills, paid in advance once everyone accepts
-        const p = store.createPlannedBill(t, m, i);
-        if (store.readyToCharge(p)) await sendOrders(t, p.id); // the logger took 100%
+      if (!i.store) { // Log expense: a bill in Split bills, where each member sets their share
+        const p = store.createLoggedBill(t, m, i);
+        await settleIfReady(t, p.id); // a solo trip has nobody else to wait for
         persist();
         return send(t);
       }
-      const rows = store.logExpense(t, m, i);
+      if (!i.bps) throw new HttpError(400, 'bps: Required');
+      const rows = store.logExpense(t, m, { ...i, bps: i.bps }); // Paid at a store: already split, straight to the transactions
       persist();
       reindex(t, rows);
       return send(t);
@@ -347,6 +349,15 @@ const captureResult = (d: Record<string, any>) => {
   const c = d.purchase_units?.[0]?.payments?.captures?.[0]?.status ?? d.status;
   return c === 'COMPLETED' ? 'captured' : c === 'DECLINED' || c === 'FAILED' ? 'failed' : null; // PENDING waits for the webhook
 };
+
+/** Everyone on a bill accepted: PayPal requests go out, or a paid logged expense becomes transactions. */
+async function settleIfReady(t: Trip, previewId: string) {
+  const p = t.previews.find((x) => x.id === previewId);
+  if (!p) return;
+  if (store.readyToCharge(p)) return sendOrders(t, previewId);
+  const rows = store.recordPaidBill(t, previewId);
+  if (rows) reindex(t, rows);
+}
 
 /** Everyone accepted: one PayPal order per member, then freeze the preview. */
 async function sendOrders(t: Trip, previewId: string, announce = true) {
