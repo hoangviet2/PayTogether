@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
-import { equalBps, money, pct, shareAmounts, type Preview, type Share, type Trip } from '../../shared/trip';
+import { equalBps, largestRemainder, money, pct, shareAmounts, type Preview, type Share, type Trip } from '../../shared/trip';
 import { api, type Ctx } from './api';
 import { editPct, Icon, icons, PayShare, PreviewCard } from './ui';
 
@@ -143,8 +143,17 @@ export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
   const [paying, setPaying] = useState<{ previewId: string; orderId: string; cents: number; payee?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const bps = trip.solo ? trip.members.map((_, i) => (i === me ? 10000 : 0)) : pcts.map((v) => Math.round((parseFloat(v) || 0) * 100));
+  const [byAmount, setByAmount] = useState(false); // split by amount instead of percent
+  const [amts, setAmts] = useState(() => trip.members.map(() => ''));
+  const [total, setTotal] = useState('');
+  const toCents = (v: string) => Math.round((parseFloat(v) || 0) * 100);
+  const amtSum = amts.reduce((a, v) => a + toCents(v), 0);
+  // shortcut: amounts go to the server as bps, so on totals over 100.00 a share can land a cent off what was typed; send cents to store-pay if that matters.
+  const bps = trip.solo ? trip.members.map((_, i) => (i === me ? 10000 : 0))
+    : byAmount ? (amtSum ? largestRemainder(10000, amts.map(toCents)) : amts.map(() => 0))
+    : pcts.map((v) => Math.round((parseFloat(v) || 0) * 100));
   const sum = bps.reduce((a, b) => a + b, 0);
+  const amtOff = !trip.solo && byAmount && amtSum !== toCents(total);
   const done = paying && trip.txs.some((x) => x.id.startsWith(`${paying.previewId}-`) && x.status === 'logged');
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
@@ -186,28 +195,39 @@ export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <label className="field">Store<input name="vendor" required maxLength={60} placeholder="Pho 24" /></label>
         <label className="field">Vendor’s PayPal email or phone<input name="contact" required maxLength={254} placeholder="pay@store.com or +1 408 555 1234" autoComplete="off" /></label>
-        <label className="field">Total ({trip.currency})<input name="total" inputMode="decimal" required pattern="\d+(\.\d{1,2})?" placeholder="42.50" /></label>
+        <label className="field">Total ({trip.currency})<input name="total" value={total} onChange={(e) => setTotal(e.target.value)} inputMode="decimal" required pattern="\d+(\.\d{1,2})?" placeholder="42.50" /></label>
         <label className="field">Type<select name="category">{['Restaurant', 'Store', 'Transport', 'Tickets', 'Other'].map((c) => <option key={c}>{c}</option>)}</select></label>
       </div>
       {!trip.solo && (
         <fieldset className="col" style={{ border: 'none', padding: 0, margin: 0, gap: 8 }}>
-          <legend className="field" style={{ marginBottom: 6 }}>Split (0% = not on it)</legend>
+          <legend className="field" style={{ marginBottom: 6 }}>Split {byAmount ? `(${trip.currency}; 0 = not on it)` : '(0% = not on it)'}</legend>
+          <div className="row" style={{ gap: 6 }}>
+            <button type="button" className={`btn ${byAmount ? '' : 'btn-on'}`} style={{ minHeight: 36 }} aria-pressed={!byAmount} onClick={() => setByAmount(false)}>Percent</button>
+            <button type="button" className={`btn ${byAmount ? 'btn-on' : ''}`} style={{ minHeight: 36 }} aria-pressed={byAmount} onClick={() => setByAmount(true)}>Amount</button>
+          </div>
           <div className="row" style={{ flexWrap: 'wrap', gap: 12 }}>
             {trip.members.map((m, i) => (
               <label key={i} className="row" style={{ gap: 6, fontSize: 14, minHeight: 44 }}>
                 <span style={{ color: m.color }}>{m.symbol}</span>{m.name}{i === me ? ' (you)' : ''}
-                <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
-                  onChange={(e) => setPcts((p) => editPct(p, i, e.target.value))} />%
+                {byAmount ? (
+                  <input value={amts[i]} inputMode="decimal" placeholder="0.00" aria-label={`${m.name}'s share in ${trip.currency}`} style={{ width: 90, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
+                    onChange={(e) => setAmts((a) => a.map((x, j) => (j === i ? e.target.value : x)))} />
+                ) : (<>
+                  <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
+                    onChange={(e) => setPcts((p) => editPct(p, i, e.target.value))} />%
+                </>)}
               </label>
             ))}
           </div>
-          {sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {pct(sum)}; they need to total 100%.</p>}
+          {byAmount
+            ? amtOff && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Amounts add up to {money(amtSum, trip.currency)}; they need to total {money(toCents(total), trip.currency)}.</p>
+            : sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {pct(sum)}; they need to total 100%.</p>}
         </fieldset>
       )}
       {error && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>{error}</p>}
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" className="btn" onClick={onDone}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={sum !== 10000 || busy}>{busy ? 'Starting PayPal…' : 'Pay'}</button>
+        <button type="submit" className="btn btn-primary" disabled={sum !== 10000 || amtOff || busy}>{busy ? 'Starting PayPal…' : 'Pay'}</button>
       </div>
     </form>
   );

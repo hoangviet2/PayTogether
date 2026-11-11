@@ -233,6 +233,14 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
   const cents = shareAmounts(p);
   const off = ratioSum(p) - 10000;
   const [draft, setDraft] = useState<number | null>(null);
+  const [byAmount, setByAmount] = useState(false); // set your share as an amount instead of a percent
+  const [amt, setAmt] = useState<string | null>(null);
+  // shortcut: the amount is sent as bps, so on totals over 100.00 it can land a cent off; add a cents endpoint if that matters.
+  const sendAmt = () => {
+    if (amt === null || p.total_cents <= 0) return setAmt(null);
+    const bp = Math.round((Math.round((parseFloat(amt) || 0) * 100) * 10000) / p.total_cents);
+    act(`/previews/${p.id}/ratio`, { bp: Math.max(0, Math.min(10000, bp)) }).then(() => setAmt(null));
+  };
   const mine = p.shares[me];
   const accepted = p.shares.filter((s) => s.accepted).length;
   return (
@@ -265,13 +273,26 @@ export function PreviewCard({ ctx, p }: { ctx: Ctx; p: Preview }) {
               <span className="mono" style={{ fontSize: 14, fontWeight: 500, minWidth: 64, textAlign: 'right' }}>{pct(i === me && draft !== null ? draft : s.ratio_bp)}</span>
               <span className="mono" style={{ fontSize: 14, minWidth: 84, textAlign: 'right' }}>{cents ? money(cents[i], p.currency) : '—'}</span>
             </div>
-            {i === me && !p.frozen && (
+            {i === me && !p.frozen && (<>
+              <div className="row" style={{ gap: 6 }}>
+                <button type="button" className={`btn ${byAmount ? '' : 'btn-on'}`} style={{ minHeight: 32, padding: '0 10px' }} aria-pressed={!byAmount} onClick={() => setByAmount(false)}>Percent</button>
+                <button type="button" className={`btn ${byAmount ? 'btn-on' : ''}`} style={{ minHeight: 32, padding: '0 10px' }} aria-pressed={byAmount} onClick={() => setByAmount(true)}>Amount</button>
+              </div>
+              {byAmount ? (
+                <form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); sendAmt(); }}>
+                  <input value={amt ?? (cents ? (cents[me] / 100).toFixed(2) : '')} inputMode="decimal" aria-label={`Your share in ${p.currency}`}
+                    style={{ width: 110, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
+                    onChange={(e) => setAmt(e.target.value)} onBlur={sendAmt} />
+                  <span className="small muted">{p.currency} of {money(p.total_cents, p.currency)}</span>
+                </form>
+              ) : (
               <input type="range" min={0} max={10000} step={50} value={draft ?? s.ratio_bp} aria-label="Your share, 0 to 100 percent"
                 aria-valuetext={pct(draft ?? s.ratio_bp)} style={{ accentColor: trip.members[i].color }}
                 onChange={(e) => setDraft(Number(e.target.value))}
                 onPointerUp={() => { if (draft !== null) act(`/previews/${p.id}/ratio`, { bp: draft }).then(() => setDraft(null)); }}
                 onKeyUp={() => { if (draft !== null) act(`/previews/${p.id}/ratio`, { bp: draft }).then(() => setDraft(null)); }} />
-            )}
+              )}
+            </>)}
           </div>
         ))}
       </div>
