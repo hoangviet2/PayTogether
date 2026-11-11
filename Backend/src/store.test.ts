@@ -165,16 +165,21 @@ test('split and store bills: the other covers the rest; 0% members get no row', 
   assert.equal(p.payee!.email, 'pho@store.com');
 });
 
-test('taking 100% needs nobody else; store bills take a custom split', () => {
+test('taking 100% needs nobody else, but the taker still accepts; store bills take a custom split', () => {
   const t = s.createTrip('Full', 'USD', ['Ana', 'Ben', 'Cy']);
   const p = s.createStoreBill(t, 1, { vendor: 'Bar', email: 'b@x.com', total: 9000, category: 'Restaurant', members: [], bps: [2000, 8000, 0] });
   assert.deepEqual(p.shares.map((x) => x.accepted), [false, false, true]);
   assert.equal(s.readyToCharge(p), false);
   s.setRatio(t, p.id, 0, 10000);
-  assert.deepEqual(p.shares.map((x) => [x.ratio_bp, x.accepted]), [[10000, true], [0, true], [0, true]]);
-  assert.equal(s.readyToCharge(p), true);
+  assert.deepEqual(p.shares.map((x) => [x.ratio_bp, x.accepted]), [[10000, false], [0, true], [0, true]]);
+  assert.equal(s.readyToCharge(p), false); // waits for Ana
+  assert.equal(s.accept(t, p.id, 0), true);
   const solo = s.createStoreBill(t, 2, { vendor: 'Kiosk', email: 'k@x.com', total: 500, category: 'Store', members: [], bps: [0, 0, 10000] });
-  assert.equal(s.readyToCharge(solo), true);
+  assert.equal(s.readyToCharge(solo), false);
+  assert.equal(s.accept(t, solo.id, 2), true);
+  const mine = s.createLoggedBill(t, 1, { date: '2027-05-20', time: '10:00', vendor: 'Taxi', type: 'Transport', total: 900, paid: false }, true);
+  assert.deepEqual(mine.shares.map((x) => [x.ratio_bp, x.accepted]), [[0, true], [10000, true], [0, true]]);
+  assert.equal(s.readyToCharge(mine), true); // Only me skips Split bills
   assert.throws(() => s.createStoreBill(t, 0, { vendor: 'X', email: 'x@x.com', total: 1, category: 'Store', members: [], bps: [5000, 4000, 0] }), /100%/);
 });
 
@@ -222,6 +227,18 @@ test('payments due: split again reopens an unpaid bill; delete needs everyone on
   assert.throws(() => s.voteDelete(t, 2, q.id), /already paid/);
   q.shares[2].status = 'none';
   assert.equal(s.voteDelete(t, 2, q.id).deleted, true);
+});
+
+test('pay at a store: the payer pays it all; once captured it becomes the split rows and the bill goes', () => {
+  const t = s.createTrip('Store', 'USD', ['Ana', 'Ben']);
+  const p = s.createStorePay(t, 1, { vendor: 'Pho 24', phone: '+14085551234', total: 3000, category: 'Restaurant', bps: [5000, 5000] });
+  assert.deepEqual(p.shares.map((x) => x.ratio_bp), [0, 10000]);
+  s.ordersCreated(t, p, ['', 'o1']);
+  s.paymentStatus('o1', 'captured');
+  const rows = s.finishStorePay(t, p);
+  assert.deepEqual(rows.map((r) => [r.id, r.member, r.paid_by, r.amount, r.source, r.status]), [[`${p.id}-0`, 0, 1, 1500, 'In-store', 'logged'], [`${p.id}-1`, 1, 1, 1500, 'In-store', 'logged']]);
+  assert.equal(t.txs.length, 2);
+  assert.equal(t.previews.length, 0);
 });
 
 test('delete trip: owner only, never once PayPal requests exist', () => {

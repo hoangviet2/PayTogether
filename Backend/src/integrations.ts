@@ -106,6 +106,17 @@ export async function createOrder(o: { requestId: string; customId: string; cent
   return d.id as string;
 }
 
+/** Sends money from PayTogether's PayPal to a phone number (Payouts API; must be enabled on the live account).
+ * batchId is the idempotency key: PayPal refuses a second batch with the same id, so a retry never pays twice. */
+export async function sendPayout(o: { batchId: string; phone: string; cents: number; currency: string; note: string }) {
+  need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');
+  const d = await pp('/v1/payments/payouts', {
+    sender_batch_header: { sender_batch_id: o.batchId, email_subject: 'You have a payment' },
+    items: [{ recipient_type: 'PHONE', receiver: o.phone, amount: { value: (o.cents / 100).toFixed(2), currency: o.currency }, note: o.note.slice(0, 4000), sender_item_id: o.batchId }],
+  }, `payout-${o.batchId}`);
+  return d.batch_header?.payout_batch_id as string;
+}
+
 /** Order status, or null when PayPal no longer has it (unapproved orders expire). */
 export async function orderStatus(orderId: string): Promise<string | null> {
   need(ready.paypal, 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET');

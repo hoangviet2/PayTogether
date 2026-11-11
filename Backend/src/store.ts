@@ -136,6 +136,7 @@ export function splitAgain(t: Trip, m: number, previewId: string): string[] {
   const p = t.previews.find((x) => x.id === previewId) ?? reject('Unknown bill.');
   if (!p.shares[m]) reject('You are not on this bill.');
   if (!p.frozen) reject('This bill is already in Split bills.');
+  if (p.split_bps) reject('This was paid at a store by one person. Delete it and pay again instead.');
   if (moneyMoved(p)) reject('Someone has already paid part of this bill, so it can’t be split again.');
   const ids = dropRows(t, p);
   p.frozen = false;
@@ -346,9 +347,9 @@ export function setRatio(t: Trip, previewId: string, m: number, bp: number): str
   const p = editablePreview(t, previewId);
   const bps = rebalanceShares(p.shares.map((s) => s.ratio_bp), m, bp);
   // Everyone re-accepts the new amounts, except people at 0% on a store bill, who owe nothing there.
-  // Taking 100% needs nobody else's say: the taker and everyone left at 0% count as accepted.
+  // Taking 100% needs nobody else's say: everyone left at 0% counts as accepted, and only the taker still accepts.
   const all = bps[m] === 10000;
-  p.shares.forEach((s, i) => Object.assign(s, { ratio_bp: bps[i], accepted: all || (!!p.payee && bps[i] === 0) }));
+  p.shares.forEach((s, i) => Object.assign(s, { ratio_bp: bps[i], accepted: (all && i !== m) || (!!p.payee && bps[i] === 0) }));
   return `split_edited: ${t.members[m].name} set their share of ${p.title} to ${(bps[m] / 100).toFixed(2)}%; the others now have ${p.shares.flatMap((s, i) => (i === m ? [] : [`${t.members[i].name} ${(s.ratio_bp / 100).toFixed(2)}%`])).join(', ')}.`;
 }
 
@@ -420,7 +421,7 @@ export function paymentStatus(orderId: string, status: 'approved' | 'captured' |
 
 /** In-store bill: someone at the counter enters the store's PayPal email, total and split (equal among the members on it
  * unless bps is given). Once everyone on it accepts, each gets a PayPal request that pays the store directly.
- * If the person adding it takes 100%, nobody else has to accept. */
+ * If one person pays 100%, only they have to accept. */
 export function createStoreBill(t: Trip, m: number, b: { vendor: string; email: string; total: number; category: string; members: number[]; bps?: number[] }): Preview {
   if (t.phase === 'SETTLED') reject('This trip is settled.');
   if (b.bps && (b.bps.length !== t.members.length || b.bps.reduce((a, x) => a + x, 0) !== 10000)) reject('Split must cover every member and total 100%.');
@@ -428,24 +429,48 @@ export function createStoreBill(t: Trip, m: number, b: { vendor: string; email: 
   if (!b.bps && !on.includes(m)) on.push(m);
   const eq = equalBps(on.length);
   const bps = b.bps ?? t.members.map((_, i) => (on.includes(i) ? eq[on.indexOf(i)] : 0));
-  const all = bps[m] === 10000;
   const p: Preview = {
     id: id(), option_id: '', kind: 'store', title: b.vendor, meta: `In-store · added by ${t.members[m].name}`,
     payee: { name: b.vendor, email: b.email.trim().toLowerCase() }, category: b.category,
     total_cents: b.total, currency: t.currency, prepaid: false, frozen: false, is_estimate: true,
-    shares: bps.map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: all || !ratio_bp, status: 'none' as const })),
+    shares: bps.map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: !ratio_bp, status: 'none' as const })), // whoever pays 100% still accepts
   };
   t.previews.push(p);
   return p;
 }
 
+/** Pay at a store: the member pays the whole amount now through PayPal, to the vendor's PayPal email directly, or to
+ * PayTogether's account for a phone vendor (forwarded by Payout once paid). bps is how it's shared afterwards. */
+export function createStorePay(t: Trip, m: number, b: { vendor: string; email?: string; phone?: string; total: number; category: string; bps: number[] }): Preview {
+  if (t.phase === 'SETTLED') reject('This trip is settled.');
+  if (b.bps.length !== t.members.length || b.bps.reduce((a, x) => a + x, 0) !== 10000) reject('Split must cover every member and total 100%.');
+  const now_ = now();
+  const p: Preview = {
+    id: id(), option_id: '', kind: 'store', title: b.vendor, meta: `Paid at the store by ${t.members[m].name}`, category: b.category,
+    ...(b.email && { payee: { name: b.vendor, email: b.email.toLowerCase() } }), ...(b.phone && { payout_phone: b.phone }),
+    date: now_.slice(0, 10), time: now_.slice(11, 16), split_bps: b.bps,
+    total_cents: b.total, currency: t.currency, prepaid: false, frozen: false, is_estimate: true,
+    shares: t.members.map((_, i) => ({ member: i, ratio_bp: i === m ? 10000 : 0, accepted: true, status: 'none' as const })),
+  };
+  t.previews.push(p);
+  return p;
+}
+
+/** A Pay at a store bill was captured: its one payment row becomes the split rows (same id prefix), and the bill goes. */
+export function finishStorePay(t: Trip, p: Preview): Txn[] {
+  const payer = p.shares.findIndex((s) => s.ratio_bp === 10000);
+  t.txs = t.txs.filter((x) => !x.id.startsWith(`${p.id}-`));
+  const rows = logExpense(t, payer, { date: p.date!, time: p.time!, vendor: p.title, type: p.category ?? 'Other', total: p.total_cents, bps: p.split_bps!, store: true }, p.id);
+  dropPreview(t, p.id);
+  return rows;
+}
+
 /** On-trip expense: one row per member share, all paid by the logger. */
 /** store: paid at a store's counter (Spending → Paid at a store), shown with source In-store. */
-export function logExpense(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; bps: number[]; store?: boolean }): Txn[] {
+export function logExpense(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; bps: number[]; store?: boolean }, base = id()): Txn[] {
   if (e.bps.length !== t.members.length || e.bps.reduce((a, b) => a + b, 0) !== 10000) reject('Split must cover every member and total 100%.');
   const cents = shareAmounts({ total_cents: e.total, shares: e.bps.map((ratio_bp) => ({ ratio_bp })) } as Preview)!;
   const leg = t.legs.find((l) => e.date >= l.arrive_date && e.date < l.depart_date) ?? t.legs.at(-1);
-  const base = id();
   const rows = cents.flatMap((amount, i): Txn[] => (amount ? [{
     id: `${base}-${i}`, member: i, paid_by: m, date: e.date, time: e.time, vendor: e.vendor, type: e.type, leg: leg?.destination.name ?? '',
     amount, total: e.total, shareBp: e.bps[i], source: e.store ? 'In-store' : 'On-trip log', status: 'logged',
@@ -457,14 +482,14 @@ export function logExpense(t: Trip, m: number, e: { date: string; time: string; 
 /** Log expense from the schedule: always a bill in Split bills, starting equal, where each member sets their own share.
  * paid: the logger already paid, so once everyone accepts it becomes transactions owed to them (recordPaidBill).
  * Not paid: a prepaid bill, so once everyone accepts each pays their share in advance through PayPal. */
-export function createLoggedBill(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; paid: boolean }): Preview {
+export function createLoggedBill(t: Trip, m: number, e: { date: string; time: string; vendor: string; type: string; total: number; paid: boolean }, onlyMe = false): Preview {
   if (t.phase === 'SETTLED') reject('This trip is settled.');
-  const solo = t.members.length === 1;
+  const solo = t.members.length === 1 || onlyMe; // Only me: 100% theirs and accepted, no splitting
   const p: Preview = {
     id: id(), option_id: '', kind: 'plan', title: e.vendor, category: e.type, date: e.date, time: e.time,
     meta: `${e.paid ? `Paid by ${t.members[m].name}` : 'Planned'} · ${e.date} ${e.time}`,
     total_cents: e.total, currency: t.currency, prepaid: !e.paid, frozen: false, is_estimate: true, ...(e.paid && { paid_by: m }),
-    shares: equalBps(t.members.length).map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: solo || i === m, status: 'none' as const })),
+    shares: (onlyMe ? t.members.map((_, i) => (i === m ? 10000 : 0)) : equalBps(t.members.length)).map((ratio_bp, i) => ({ member: i, ratio_bp, accepted: solo || i === m, status: 'none' as const })),
   };
   t.previews.push(p);
   return p;

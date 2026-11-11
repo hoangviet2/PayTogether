@@ -101,6 +101,8 @@ function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElemen
   const [seenDay, setSeenDay] = useState(day);
   if (day !== seenDay) { setSeenDay(day); setDate(day); } // a double-click on another day opens the dialog on that day
   const [paid, setPaid] = useState(true);
+  const [onlyMe, setOnlyMe] = useState(false); // 100% mine: skips Split bills
+  const solo = trip.solo || onlyMe;
   const cents = Math.round(parseFloat(amount) * 100);
   const valid = Number.isFinite(cents) && cents > 0;
 
@@ -109,7 +111,7 @@ function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElemen
     if (!valid) return;
     const form = e.currentTarget;
     const f = new FormData(form);
-    await act('/txns', { date, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, paid });
+    await act('/txns', { date, time: String(f.get('time') || '12:00'), vendor: String(f.get('vendor')).trim(), type: String(f.get('type')), total: cents, paid, only_me: onlyMe });
     form.reset();
     setAmount('');
     onDone();
@@ -127,6 +129,12 @@ function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElemen
           <button type="button" aria-pressed={paid} onClick={() => setPaid(true)}>Already paid</button>
           <button type="button" aria-pressed={!paid} onClick={() => setPaid(false)}>Just planned</button>
         </div>
+        {!trip.solo && (
+          <div role="group" aria-label="Who is it for?" className="seg" style={{ alignSelf: 'flex-start' }}>
+            <button type="button" aria-pressed={!onlyMe} onClick={() => setOnlyMe(false)}>Split with the group</button>
+            <button type="button" aria-pressed={onlyMe} onClick={() => setOnlyMe(true)}>Only me</button>
+          </div>
+        )}
         <label className="field">Vendor<input name="vendor" required maxLength={60} /></label>
         <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <label className="field" style={{ flex: '1 1 140px' }}>Date<input type="date" required value={date} min={days[0]} max={days.at(-1)} onChange={(e) => setDate(e.target.value)} /></label>
@@ -138,14 +146,14 @@ function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElemen
           </label>
           <label className="field" style={{ flex: '1 1 140px' }}>Amount ({trip.currency})<input name="amount" inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} pattern="\d+(\.\d{1,2})?" /></label>
         </div>
-        <span className="small muted">{trip.solo
-          ? (paid ? 'It goes straight to Spending.' : 'It goes to Payments due on Spending, to pay in advance with PayPal.')
+        <span className="small muted">{solo
+          ? (paid ? `It's 100% yours and goes straight to the Spending list.` : `It's 100% yours and goes straight to Payments due on Spending, to pay in advance with PayPal.`)
           : `Next, it opens in Split bills on Spending, starting equal; everyone sets their own share there and accepts. ${paid
             ? 'Once everyone accepts it goes to the Spending list; the others owe you their share.'
             : 'Once everyone accepts, each pays their share in advance with PayPal.'}`}</span>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="btn" onClick={onDone}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={!valid}>{trip.solo ? 'Save expense' : 'Continue to split bill'}</button>
+          <button type="submit" className="btn btn-primary" disabled={!valid}>{!solo ? 'Continue to split bill' : paid ? 'Save expense' : 'Add to Payments due'}</button>
         </div>
       </form>
     </dialog>

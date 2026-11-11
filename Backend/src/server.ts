@@ -3,7 +3,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { mySummary, searchTxns, shareAmounts, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
+import { mySummary, searchTxns, shareAmounts, type Preview, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
 import * as store from './store.ts';
 import * as ext from './integrations.ts';
 import { runTool, runTurn, shouldReply, turnContext } from './wayfinder.ts';
@@ -223,7 +223,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (e === 'ratio' && is('POST', 6)) {
         const { bp } = await body(req, z.object({ bp: z.number().int().min(0).max(10000) }));
         wayfinder(t, store.setRatio(t, d, m, bp));
-        await settleIfReady(t, d); // someone took 100%
+        await settleIfReady(t, d);
       } else if (e === 'equal' && is('POST', 6)) store.resetEqual(t, d, m);
       else if ((e === 'split-again' || e === 'delete') && is('POST', 6)) {
         const r = e === 'delete' ? store.voteDelete(t, m, d) : { deleted: false, ids: store.splitAgain(t, m, d) };
@@ -271,6 +271,20 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       persist();
       return send(t);
     }
+    if (c === 'store-pay' && is('POST', 4)) {
+      const i = await body(req, z.object({
+        vendor: name, contact: z.string().trim().min(3).max(254), total: z.number().int().positive().max(100_000_00),
+        category: z.enum(['Restaurant', 'Store', 'Transport', 'Tickets', 'Other']), bps: z.array(z.number().int().min(0).max(10000)).max(20),
+      }));
+      // An email pays the vendor's PayPal directly; a phone number goes to PayTogether, then a Payout to that phone.
+      const email = i.contact.includes('@') ? z.string().email().safeParse(i.contact).data : undefined;
+      const phone = email ? undefined : /^\+?[\d\s().-]{7,20}$/.test(i.contact) ? i.contact.replace(/[^\d+]/g, '') : undefined;
+      if (!email && !phone) throw new HttpError(400, 'Enter the vendor’s PayPal email or phone number.');
+      const p = store.createStorePay(t, m, { ...i, email, phone });
+      try { await sendOrders(t, p.id, false); } catch (e) { store.dropPreview(t, p.id); throw e; }
+      persist();
+      return send({ trip: t, previewId: p.id });
+    }
     if (c === 'store-bills' && is('POST', 4)) {
       const i = await body(req, z.object({
         vendor: name, email: z.string().trim().email().max(254), total: z.number().int().positive().max(100_000_00),
@@ -278,17 +292,22 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         bps: z.array(z.number().int().min(0).max(10000)).max(20).optional(),
       }));
       const p = store.createStoreBill(t, m, i);
-      if (store.readyToCharge(p)) await sendOrders(t, p.id); // the person adding it took 100%
       persist();
       return send(t);
     }
     if (c === 'txns' && is('POST', 4)) {
       const i = await body(req, z.object({
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/), vendor: name, type: name,
-        total: z.number().int().positive().max(100_000_00), bps: z.array(z.number().int().min(0).max(10000)).optional(), paid: z.boolean().default(true), store: z.boolean().default(false),
+        total: z.number().int().positive().max(100_000_00), bps: z.array(z.number().int().min(0).max(10000)).optional(), paid: z.boolean().default(true), store: z.boolean().default(false), only_me: z.boolean().default(false),
       }));
-      if (!i.store) { // Log expense: a bill in Split bills, where each member sets their share
-        const p = store.createLoggedBill(t, m, i);
+      if (i.only_me && i.paid) { // Only me, already paid: no split, straight to the Spending list
+        const rows = store.logExpense(t, m, { ...i, bps: t.members.map((_, k) => (k === m ? 10000 : 0)) });
+        persist();
+        reindex(t, rows);
+        return send(t);
+      }
+      if (!i.store) { // Log expense: a bill in Split bills, where each member sets their share (Only me + planned: 100% theirs, straight to Payments due)
+        const p = store.createLoggedBill(t, m, i, i.only_me);
         await settleIfReady(t, p.id); // a solo trip has nobody else to wait for
         persist();
         return send(t);
@@ -343,9 +362,30 @@ async function route(req: IncomingMessage, res: ServerResponse) {
 function applyStatus(orderId: string, status: 'approved' | 'captured' | 'failed') {
   const hit = store.paymentStatus(orderId, status);
   if (!hit) return;
+  const p = hit.trip.previews.find((x) => x.shares.some((s) => s.order_id === orderId));
+  let rows = [hit.row];
+  if (status === 'captured' && p?.split_bps) { // Pay at a store: straight to the transactions, split as entered
+    rows = store.finishStorePay(hit.trip, p);
+    if (p.payout_phone) forwardPayout(hit.trip, p);
+  }
   persist();
-  reindex(hit.trip, [hit.row]);
+  reindex(hit.trip, rows);
   wayfinder(hit.trip, hit.event);
+}
+
+/** Forwards a captured phone-vendor payment. Recorded on the trip before and after, so money PayTogether holds is never
+ * untracked; a failure is told to the group. shortcut: final payout status (webhooks PAYMENT.PAYOUTS-ITEM.*) isn't tracked. */
+function forwardPayout(t: Trip, p: Preview) {
+  const rec = { id: p.id, vendor: p.title, phone: p.payout_phone!, cents: p.total_cents, status: 'sending' as 'sending' | 'sent' | 'failed', error: undefined as string | undefined };
+  (t.payouts ??= []).push(rec);
+  ext.sendPayout({ batchId: p.id, phone: rec.phone, cents: rec.cents, currency: p.currency, note: `${t.name} · ${p.title}` })
+    .then(() => { rec.status = 'sent'; })
+    .catch((e) => {
+      Object.assign(rec, { status: 'failed', error: e.message });
+      console.error(`Payout ${p.id} to ${rec.phone} failed:`, e.message);
+      store.say(t, 'ai', `The payment to ${p.title} reached PayTogether, but forwarding it to their phone failed. It needs a retry or a refund; the trip owner should contact support.`);
+    })
+    .finally(persist);
 }
 /** Status of a capture response from PayPal's API. */
 const captureResult = (d: Record<string, any>) => {

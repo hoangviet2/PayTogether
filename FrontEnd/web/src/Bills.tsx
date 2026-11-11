@@ -1,13 +1,13 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
-import { equalBps, money, pct, shareAmounts, type Preview, type Share } from '../../shared/trip';
-import type { Ctx } from './api';
+import { equalBps, money, pct, shareAmounts, type Preview, type Share, type Trip } from '../../shared/trip';
+import { api, type Ctx } from './api';
 import { editPct, Icon, icons, PayShare, PreviewCard } from './ui';
 
 type Row = {
   id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string;
-  frozen: boolean; locked: boolean; votes: number; needed: number; voted: boolean; solo: number | null; // for Split again / Delete
+  frozen: boolean; storePay: boolean; locked: boolean; votes: number; needed: number; voted: boolean; solo: number | null; // for Split again / Delete
 };
 type GridCtx = { pay: (r: Row) => void; act: Ctx['act'] };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
@@ -26,7 +26,7 @@ export function SplitBills({ ctx }: { ctx: Ctx }) {
         <h2 id="split-h" style={{ fontSize: 20 }}>{trip.solo ? 'Your bills' : 'Split bills'}</h2>
         <span className="small muted">{trip.solo
           ? 'Every bill is 100% yours. Accept one to move it to Payments due.'
-          : 'Move your own bar; the others adjust so shares always add up to 100%. When everyone accepts, the bill moves to Payments due.'}</span>
+          : 'Move your own bar; the others adjust so shares always add up to 100%. When everyone accepts, the bill moves to Payments due. If one person takes 100%, only they need to accept.'}</span>
       </div>
       {!open.length && <p className="card muted">Everyone has accepted every bill. Pay your shares in Payments due below.</p>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>
@@ -53,7 +53,7 @@ function ActionsCell({ data, context }: CustomCellRendererProps<Row, unknown, Gr
   return (
     <span className="row" style={{ gap: 6, height: '100%' }}>
       {payable(r) && <button type="button" className="btn btn-primary" style={sm} onClick={() => context.pay(r)}>Pay</button>}
-      {r.frozen && !r.locked && <button type="button" className="btn" style={sm} onClick={again}>Split again</button>}
+      {r.frozen && !r.locked && !r.storePay && <button type="button" className="btn" style={sm} onClick={again}>Split again</button>}
       {canDelete && (
         <button type="button" className={`btn ${r.voted ? 'btn-on' : ''}`} style={sm} onClick={del} aria-pressed={r.solo == null ? r.voted : undefined}
           title={r.solo == null ? 'Everyone on the bill must agree to delete it' : 'You pay 100%, so you can delete it'}>
@@ -74,7 +74,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
     const cents = shareAmounts(p);
     const on = p.shares.flatMap((s, i) => (s.ratio_bp ? [i] : []));
     const votes = p.delete_votes ?? [];
-    const bill = { frozen: p.frozen, locked: p.shares.some((s) => s.status === 'approved' || s.status === 'captured'), votes: votes.length, needed: on.length, solo: on.length === 1 ? on[0] : null };
+    const bill = { frozen: p.frozen, storePay: !!p.split_bps, locked: p.shares.some((s) => s.status === 'approved' || s.status === 'captured'), votes: votes.length, needed: on.length, solo: on.length === 1 ? on[0] : null };
     return p.shares.flatMap((s, i) => (!s.ratio_bp || s.status === 'captured' || (!s.accepted && !p.frozen) ? [] : [{ // paid: moves to the Spending grid
       id: `${p.id}-${i}`, previewId: p.id, bill: p.title, kind: KIND[p.kind], member: i, memberName: trip.members[i].name, isMe: i === me,
       bp: s.ratio_bp, cents: cents?.[i] ?? null, status: status(p, s), orderId: s.order_id, ...bill, voted: votes.includes(i),
@@ -134,30 +134,58 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   );
 }
 
-/** Now as an ISO string in the payer's time zone ('YYYY-MM-DDTHH:MM…'). */
-const localNow = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString(); };
-
-/** Paid at a store (a dinner, a ticket at the door): already settled at the counter, so it goes straight into the
- * transactions with the payer's split. Nothing to pay through PayPal; the others owe the payer (Dashboard → settle up). */
+/** Pay at a store: the member pays the vendor now through PayPal (their PayPal email directly, or a phone number via
+ * PayTogether and a Payout). Once PayPal confirms, it goes straight to the Spending list with the split entered here. */
 export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
-  const { trip, me, act } = ctx;
-  // Percent per member as typed; 0 means not on the bill. Starts equal.
+  const { trip, me } = ctx;
+  // Percent per member as typed; 0 means not on it. Starts equal.
   const [pcts, setPcts] = useState(() => equalBps(trip.members.length).map((b) => String(b / 100)));
+  const [paying, setPaying] = useState<{ previewId: string; orderId: string; cents: number; payee?: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const bps = trip.solo ? trip.members.map((_, i) => (i === me ? 10000 : 0)) : pcts.map((v) => Math.round((parseFloat(v) || 0) * 100));
   const sum = bps.reduce((a, b) => a + b, 0);
+  const done = paying && trip.txs.some((x) => x.id.startsWith(`${paying.previewId}-`) && x.status === 'logged');
+
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const total = Math.round(parseFloat(String(f.get('total'))) * 100);
-    const local = localNow();
-    await act('/txns', { date: local.slice(0, 10), time: local.slice(11, 16), vendor: String(f.get('vendor')).trim(), type: String(f.get('category')), total, bps, paid: true, store: true });
-    onDone();
+    const contact = String(f.get('contact')).trim();
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api<{ trip: Trip; previewId: string }>(`/trips/${trip.id}/store-pay`, { body: { vendor: String(f.get('vendor')).trim(), contact, total, category: f.get('category'), bps } });
+      const p = r.trip.previews.find((x) => x.id === r.previewId);
+      const orderId = p?.shares[me].order_id;
+      if (orderId) setPaying({ previewId: r.previewId, orderId, cents: total, payee: p?.payee?.email });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  if (done) return (
+    <p role="status" className="row small" style={{ gap: 8, margin: 0, background: 'var(--blue-tint)', color: 'var(--brand)', padding: '10px 14px', borderRadius: 10, justifyContent: 'space-between' }}>
+      <span className="row" style={{ gap: 6 }}><Icon d={icons.check} />Payment successful. It’s in the Spending list below.</span>
+      <button type="button" className="btn" style={{ minHeight: 32 }} onClick={onDone}>Done</button>
+    </p>
+  );
+  if (paying) return (
+    <div className="col" style={{ gap: 10, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 14, padding: 16 }}>
+      <strong>Pay {money(paying.cents, trip.currency)}</strong>
+      <PayShare key={paying.orderId} ctx={ctx} previewId={paying.previewId} orderId={paying.orderId} payee={paying.payee} currency={trip.currency} autoOpen label={`Pay ${money(paying.cents, trip.currency)}`} />
+      <span className="small muted">Once PayPal confirms, it goes straight to the Spending list. If you close this, you can still pay it from Payments due.</span>
+      <button type="button" className="btn" style={{ alignSelf: 'flex-start' }} onClick={onDone}>Close</button>
+    </div>
+  );
   return (
     <form onSubmit={submit} className="col" style={{ gap: 12, background: 'var(--bg)', border: '1px solid var(--line)', borderRadius: 14, padding: 16 }}>
-      <p className="small muted">You already paid at the store. It goes straight into the transactions below; nothing more to pay.{trip.solo ? '' : ' The others owe you their share (Dashboard → settle up).'}</p>
+      <p className="small muted">Pay the vendor now with PayPal. A PayPal email is paid directly; a phone number is paid through PayTogether. Once it’s paid it goes straight to the Spending list.{trip.solo ? '' : ' The others owe you their share (Dashboard → settle up).'}</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <label className="field">Store<input name="vendor" required maxLength={60} placeholder="Pho 24" /></label>
+        <label className="field">Vendor’s PayPal email or phone<input name="contact" required maxLength={254} placeholder="pay@store.com or +1 408 555 1234" autoComplete="off" /></label>
         <label className="field">Total ({trip.currency})<input name="total" inputMode="decimal" required pattern="\d+(\.\d{1,2})?" placeholder="42.50" /></label>
         <label className="field">Type<select name="category">{['Restaurant', 'Store', 'Transport', 'Tickets', 'Other'].map((c) => <option key={c}>{c}</option>)}</select></label>
       </div>
@@ -176,9 +204,10 @@ export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
           {sum !== 10000 && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>Shares add up to {pct(sum)}; they need to total 100%.</p>}
         </fieldset>
       )}
+      {error && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>{error}</p>}
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button type="button" className="btn" onClick={onDone}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={sum !== 10000}>Save payment</button>
+        <button type="submit" className="btn btn-primary" disabled={sum !== 10000 || busy}>{busy ? 'Starting PayPal…' : 'Pay'}</button>
       </div>
     </form>
   );

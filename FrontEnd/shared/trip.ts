@@ -294,6 +294,8 @@ export type Share = { member: number; ratio_bp: number; accepted: boolean; statu
 export type Preview = {
   id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining' | 'store' | 'shop' | 'plan'; title: string; meta: string;
   date?: string; time?: string; // logged expenses: when it happened / happens
+  split_bps?: number[]; // Pay at a store: the payer pays it all, then this split goes to the transactions once paid
+  payout_phone?: string; // Pay at a store to a phone number: PayTogether forwards the money by PayPal Payout
   delete_votes?: number[]; // members on the bill who agreed to delete it from Payments due
   paid_by?: number; // logged expense someone already paid: once everyone accepts it becomes transactions, no PayPal
   payee?: { name: string; email: string }; category?: string; // store bills: each member pays the store's PayPal directly
@@ -310,6 +312,7 @@ export type Trip = {
   destinations: string[]; legs: Leg[]; polls: Poll[]; previews: Preview[]; chat: LiveMsg[]; txs: Txn[];
   confirms: number[]; busy: boolean; solo?: boolean; // solo: one traveler, join code closed
   invites?: { user: string; name: string }[]; // accounts invited by email that haven't accepted yet
+  payouts?: { id: string; vendor: string; phone: string; cents: number; status: 'sending' | 'sent' | 'failed'; error?: string }[]; // money PayTogether forwards to phone vendors
 };
 
 export const money = (cents: number, currency: string) =>

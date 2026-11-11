@@ -318,12 +318,12 @@ const loadSdk = (src: string) => {
 };
 
 /** PayPal buttons for this member's existing order. Approval here is optimistic; the webhook sets the real status. */
-export function PayShare({ ctx, previewId, orderId, label, currency, autoOpen }: { ctx: Ctx; previewId: string; orderId: string; label: string; currency: string; autoOpen?: boolean }) {
+export function PayShare({ ctx, previewId, orderId, label, currency, autoOpen, payee: payeeProp }: { ctx: Ctx; previewId: string; orderId: string; label: string; currency: string; autoOpen?: boolean; payee?: string }) {
   const cfg = useConfig();
   const box = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<'idle' | 'open' | 'approved' | 'error'>(autoOpen ? 'open' : 'idle');
   const [msg, setMsg] = useState('');
-  const payee = ctx.trip.previews.find((p) => p.id === previewId)?.payee?.email;
+  const payee = payeeProp ?? ctx.trip.previews.find((p) => p.id === previewId)?.payee?.email; // a just-created bill isn't in ctx.trip until the next poll
   useEffect(() => {
     if (state !== 'open' || !cfg?.paypalClientId || !box.current) return;
     let btns: ReturnType<PayPalSdk['Buttons']> | null = null;
