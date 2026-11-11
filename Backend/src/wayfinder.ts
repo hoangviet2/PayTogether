@@ -113,9 +113,9 @@ export function toolsFor(t: Trip) {
     }));
   if (at('DESTINATIONS'))
     tools.push(tool({
-      name: 'propose_destinations', description: 'Write the pending destination list and date window for the group to confirm.',
+      name: 'propose_destinations', description: 'Write the pending destination list (in travel order) and date window for the group to confirm. Replaces the whole list, so include every place to keep.',
       inputSchema: z.object({ destinations: z.array(z.string().min(1)).min(1), start_date: date, end_date: date, budget_per_person_cents: z.number().int().positive().optional() }),
-      run: async (i) => guard(() => (store.proposeDestinations(t, i.destinations, i.start_date, i.end_date, i.budget_per_person_cents), 'Saved. Tell the group to press Confirm destinations.')),
+      run: async (i) => guard(() => (store.proposeDestinations(t, i.destinations, i.start_date, i.end_date, i.budget_per_person_cents), 'Saved.')),
     }));
   if (at('DESTINATIONS', 'PLACES'))
     tools.push(tool({
@@ -200,7 +200,7 @@ Don't reveal anyone's PayPal details or payment status beyond paid/unpaid.
 Editing the plan: when a member asks to change the trip (name, dates, budget, which places, their order, nights per place), make the change yourself right away with update_trip, set_stops or set_nights instead of asking them to do it. Then say in one or two lines what changed, including any nights moved automatically to keep the trip length (the tool result lists them). Edits reset confirmations, so remind them to confirm again. A new stop in PLACES needs a stay poll. From PRICING on the plan is locked; say so.
 
 Phase playbook:
-- DESTINATIONS: gather destinations, date window, optional budget. When settled, call propose_destinations and tell them to press Confirm destinations.
+- DESTINATIONS: gather destinations, date window, optional budget. When a member names a place, add it to the pending list right away with propose_destinations, keeping every place already on it; don't ask "add it?". A landmark or venue (a stadium, a tower, a theme park) stands for the city it's in: pick its best-known location (Trump Tower means New York City, Husky Stadium means Seattle) instead of asking, and mention the city only when it isn't obvious from the name. When someone asks to arrange, order or route the places, put them in the order that travels most smoothly (nearby places next to each other, fewest long flights and no backtracking), save that order with propose_destinations, and give the order in one sentence with a short reason. If the date window isn't set yet, ask for it once. Remind them to press Confirm destinations only after reordering or when someone asks what's next, not after every added place.
 - TIMELINE: when the phase starts, call draft_timeline once. Members can also change nights themselves on the Plan tab; those edits always keep the trip length, so don't comment on them. Don't re-draft unless asked.
 - PLACES: when the phase starts, for each leg use web_search for stays and call create_poll (kind "stay", leg_id set) with 3–4 options and real prices from results (convert nothing; use the trip currency only if the source shows it, else price null). On option_added, look it up and call enrich_option.
 - PRICING: the app prices every winning stay automatically when the phase starts; if the event says one couldn't be priced, find its price, call enrich_option, then build_price_preview. Explain each preview in one compact line, e.g. "🏨 Hotel Arts · 3 nights · $1,260.00 total (est.) · split 4 ways → $315.00 each." On split_edited, briefly confirm the new shares (the app moves the others automatically so they always total 100%).
