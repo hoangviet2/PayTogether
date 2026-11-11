@@ -57,11 +57,10 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const columnDefs = useMemo<ColDef<Row>[]>(() => [
     { field: 'bill', headerName: 'Bill', flex: 2, minWidth: 160 },
     { field: 'kind', headerName: 'Type', width: 110 },
-    { field: 'memberName', headerName: 'Who', width: 150, valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}${p.data.isMe ? ' (you)' : ''}` : p.value),
+    { field: 'memberName', headerName: 'Account', width: 150, valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}${p.data.isMe ? ' (you)' : ''}` : p.value),
       cellStyle: (p) => (p.data ? { color: trip.members[p.data.member].color, fontWeight: 600 } : null) },
     { field: 'bp', headerName: 'Share', width: 100, valueFormatter: (p) => (p.value == null ? '' : pct(p.value)) },
     { field: 'cents', headerName: 'Amount', type: 'rightAligned', width: 120, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, trip.currency)) },
-    { field: 'status', headerName: 'Status', flex: 1, minWidth: 170 },
     { headerName: '', colId: 'pay', width: 130, cellRenderer: PayCell, sortable: false, filter: false },
   ], [trip.currency, trip.members]);
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []);

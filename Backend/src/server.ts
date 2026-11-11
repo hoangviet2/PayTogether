@@ -173,6 +173,12 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       persist();
       return send({ trip: t, previewId: p.id });
     }
+    if (c === 'purchases' && d && is('DELETE', 5)) {
+      const ids = store.deletePurchase(t, m, d);
+      persist();
+      ext.deleteTxnDocs(t.id, ids).catch((e) => console.error('Elastic cleanup failed:', e.message));
+      return send(t);
+    }
     if (is('DELETE', 3)) {
       store.deleteTrip(t, m);
       persist(); // rewrites the trips file on the disk without this trip

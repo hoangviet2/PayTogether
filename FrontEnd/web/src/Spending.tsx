@@ -6,7 +6,7 @@ import { api, type Ctx } from './api';
 import { Icon, icons } from './ui';
 import { Bills, SplitBills, StoreBill } from './Bills';
 
-type Row = Txn & { memberName: string; paidByName: string };
+type Row = Txn & { memberName: string };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
 
 export function Spending({ ctx }: { ctx: Ctx }) {
@@ -28,7 +28,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
 
   const active = q.trim() ? hit : null;
   const rows = useMemo<Row[]>(
-    () => trip.txs.filter((t) => payStage(t.status) === 'Paid' && (!active || active.ids.has(t.id))).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map((t) => ({ ...t, memberName: trip.members[t.member].name, paidByName: trip.members[t.paid_by].name })),
+    () => trip.txs.filter((t) => payStage(t.status) === 'Paid' && (!active || active.ids.has(t.id))).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map((t) => ({ ...t, memberName: trip.members[t.member].name })),
     [trip.txs, trip.members, active],
   );
   const columnDefs = useMemo<ColDef<Row>[]>(() => {
@@ -39,14 +39,12 @@ export function Spending({ ctx }: { ctx: Ctx }) {
       valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}` : p.value), cellStyle: (p) => (p.data ? { color: trip.members[p.data.member].color, fontWeight: 600 } : null) },
     { field: 'date', headerName: 'Date', width: 120 },
     { field: 'time', width: 90 },
-    { field: 'vendor' },
+    { field: 'vendor', headerName: 'Place' },
     { field: 'type', width: 120 },
-    { field: 'leg', headerName: 'Leg' },
+    { field: 'leg', headerName: 'Destination' },
     { field: 'amount', headerName: 'Amount', type: 'rightAligned', valueFormatter: cur, filter: 'agNumberColumnFilter', width: 130 },
     { field: 'total', headerName: 'Item total', type: 'rightAligned', valueFormatter: cur, width: 130 },
     { field: 'shareBp', headerName: 'Share', valueFormatter: (p) => (p.value == null ? '' : pct(p.value)), width: 100 },
-    { field: 'paidByName', headerName: 'Paid by', width: 120, cellStyle: (p) => (p.data ? { color: trip.members[p.data.paid_by].color } : null) },
-    { field: 'source', width: 140 },
   ];
   }, [trip.currency, trip.members]);
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []); // no header sorting; rows stay in date order

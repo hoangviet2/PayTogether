@@ -4,7 +4,6 @@ import { api, type Ctx } from './api';
 import { Icon, icons, PayShare } from './ui';
 
 type Hit = { id: string; title: string; image?: string; offers: { domain: string; url: string; cents: number; currency: string; inStock: boolean }[] };
-type Paying = { previewId: string; orderId: string; title: string; cents: number };
 
 export function Shop({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
@@ -13,8 +12,8 @@ export function Shop({ ctx }: { ctx: Ctx }) {
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [paying, setPaying] = useState<Paying | null>(null);
-  const [opening, setOpening] = useState<string | null>(null); // product whose PayPal order is being created
+  const [added, setAdded] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null); // product being added to the cart
 
   const search = async (e: FormEvent) => {
     e.preventDefault();
@@ -30,15 +29,15 @@ export function Shop({ ctx }: { ctx: Ctx }) {
     }
   };
 
-  // Same flow as Pay in Spending: a PayPal order for the price, then PayPal opens here. It also lands in Payments due.
-  const checkout = async (h: Hit) => {
+  // Adds the item to the PayPal cart (Bought online, below) and to Payments due; it's paid from either one.
+  const addToCart = async (h: Hit) => {
     const offer = h.offers[0];
     setError(null);
+    setAdded(null);
     setOpening(h.id);
     try {
-      const r = await api<{ trip: Trip; previewId: string }>(`/trips/${trip.id}/purchases`, { body: { title: h.title, url: offer.url, cents: offer.cents } });
-      const orderId = r.trip.previews.find((p) => p.id === r.previewId)?.shares[ctx.me].order_id;
-      if (orderId) setPaying({ previewId: r.previewId, orderId, title: h.title, cents: offer.cents });
+      await api<{ trip: Trip; previewId: string }>(`/trips/${trip.id}/purchases`, { body: { title: h.title, url: offer.url, cents: offer.cents } });
+      setAdded(h.title);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -63,6 +62,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
         </form>
         <span className="small muted">Results via Channel3. Product data comes from merchants and is shown as-is.</span>
         {error && <p role="alert" className="small" style={{ color: 'var(--orange-ink)' }}>{error}</p>}
+        {added && <p role="status" className="small" style={{ color: 'var(--brand)' }}>Added {added} to your PayPal cart. Pay it from Bought online below or from Payments due on Spending.</p>}
         <div className="grid-auto">
           {hits?.map((h) => {
             const best = [...h.offers].sort((a, b) => a.cents - b.cents)[0];
@@ -77,7 +77,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
                     <a className="btn btn-outline" href={best.url} target="_blank" rel="noreferrer noopener">Open merchant</a>
                     <button type="button" className="btn btn-primary" disabled={opening === h.id || best.currency !== trip.currency}
                       title={best.currency !== trip.currency ? `Priced in ${best.currency}; this trip pays in ${trip.currency}` : undefined}
-                      onClick={() => checkout({ ...h, offers: [best] })}>{opening === h.id ? 'Starting PayPal…' : 'Checkout with PayPal'}</button>
+                      onClick={() => addToCart({ ...h, offers: [best] })}>{opening === h.id ? 'Adding…' : 'Add to PayPal cart'}</button>
                   </div>
                 )}
               </div>
@@ -89,19 +89,6 @@ export function Shop({ ctx }: { ctx: Ctx }) {
 
       <Orders ctx={ctx} />
 
-      {paying && (
-        <section className="card" aria-labelledby="pp-h">
-          <div className="between" style={{ alignItems: 'center' }}>
-            <div className="col">
-              <span className="eyebrow">Checkout with PayPal</span>
-              <h2 id="pp-h" style={{ fontSize: 18 }}>{paying.title} · {money(paying.cents, trip.currency)}</h2>
-            </div>
-            <button type="button" className="btn" onClick={() => setPaying(null)}>Close</button>
-          </div>
-          <PayShare key={paying.orderId} ctx={ctx} previewId={paying.previewId} orderId={paying.orderId} currency={trip.currency} autoOpen label={`Pay ${money(paying.cents, trip.currency)}`} />
-          <p className="small muted">It’s also in Payments due on the Spending tab, so you can pay it later from there.</p>
-        </section>
-      )}
     </>
   );
 }
@@ -113,6 +100,13 @@ const ORDER_STATUS: Record<Share['status'], [string, string]> = {
 /** Order summary of everything the group bought online, laid out like a store's checkout summary. */
 function Orders({ ctx }: { ctx: Ctx }) {
   const { trip, me } = ctx;
+  const [paying, setPaying] = useState<string | null>(null); // preview id whose PayPal panel is open
+  const [error, setError] = useState<string | null>(null);
+  const remove = async (id: string, title: string) => {
+    if (!confirm(`Remove ${title} from your cart?`)) return;
+    setError(null);
+    try { await api(`/trips/${trip.id}/purchases/${id}`, { method: 'DELETE' }); } catch (e) { setError((e as Error).message); } // the 2 s poll drops it from the list
+  };
   const items = trip.previews.filter((p) => p.kind === 'shop').map((p) => {
     const buyer = p.shares.findIndex((s) => s.ratio_bp === 10000);
     return { p, buyer, status: p.shares[buyer]?.status ?? 'none', store: p.meta.split(' · ')[1] ?? '' };
@@ -122,7 +116,7 @@ function Orders({ ctx }: { ctx: Ctx }) {
   return (
     <section className="card" aria-labelledby="orders-h" style={{ maxWidth: 560 }}>
       <div className="between" style={{ alignItems: 'baseline' }}>
-        <h2 id="orders-h" style={{ fontSize: 18 }}>Bought online</h2>
+        <h2 id="orders-h" style={{ fontSize: 18 }}>Bought online · PayPal cart</h2>
         <span className="small muted">{items.length} item{items.length === 1 ? '' : 's'}</span>
       </div>
       <ul className="col" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 0 }}>
@@ -130,13 +124,27 @@ function Orders({ ctx }: { ctx: Ctx }) {
           const m = trip.members[buyer];
           const [label, pill] = ORDER_STATUS[status];
           return (
-            <li key={p.id} className="between" style={{ gap: 12, padding: '12px 0', borderBottom: '1px solid var(--line-2)', alignItems: 'flex-start' }}>
+            <li key={p.id} className="between" style={{ flexWrap: 'wrap', gap: 12, padding: '12px 0', borderBottom: '1px solid var(--line-2)', alignItems: 'flex-start' }}>
               <div className="col" style={{ gap: 3, minWidth: 0 }}>
                 <span style={{ fontWeight: 600, fontSize: 14 }}>{p.title}</span>
                 <span className="small muted">{store}{m && <> · <span style={{ color: m.color }}>{m.symbol}</span> {m.name}{buyer === me ? ' (you)' : ''}</>}</span>
                 <span className={`pill ${pill}`} style={{ fontSize: 11, alignSelf: 'flex-start' }}>{label}</span>
               </div>
-              <span className="mono" style={{ fontSize: 14, whiteSpace: 'nowrap' }}>{money(p.total_cents, p.currency)}</span>
+              <div className="col" style={{ alignItems: 'flex-end', gap: 8 }}>
+                <span className="mono" style={{ fontSize: 14, whiteSpace: 'nowrap' }}>{money(p.total_cents, p.currency)}</span>
+                {buyer === me && (status === 'created' || status === 'failed') && paying !== p.id && (
+                  <div className="row" style={{ gap: 6 }}>
+                    <button type="button" className="btn" style={{ minHeight: 36 }} onClick={() => remove(p.id, p.title)}>Delete</button>
+                    <button type="button" className="btn btn-primary" style={{ minHeight: 36 }} onClick={() => setPaying(p.id)}>Pay</button>
+                  </div>
+                )}
+              </div>
+              {paying === p.id && status !== 'captured' && p.shares[buyer]?.order_id && (
+                <div className="col" style={{ gap: 6, flexBasis: '100%' }}>
+                  <PayShare key={p.id} ctx={ctx} previewId={p.id} orderId={p.shares[buyer].order_id!} currency={trip.currency} autoOpen label={`Pay ${money(p.total_cents, trip.currency)}`} />
+                  <button type="button" className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => setPaying(null)}>Close</button>
+                </div>
+              )}
             </li>
           );
         })}
@@ -146,7 +154,8 @@ function Orders({ ctx }: { ctx: Ctx }) {
         <div className="between small"><dt className="muted">Not paid yet</dt><dd className="mono" style={{ margin: 0 }}>{money(sum((s) => s !== 'captured'), trip.currency)}</dd></div>
         <div className="between" style={{ borderTop: '1px solid var(--line)', paddingTop: 8, fontWeight: 600 }}><dt>Total</dt><dd className="mono" style={{ margin: 0 }}>{money(sum(() => true), trip.currency)}</dd></div>
       </dl>
-      <span className="small muted">Unpaid items can be paid from Payments due on the Spending tab.</span>
+      {error && <p role="alert" className="small" style={{ color: 'var(--orange-ink)', margin: 0 }}>{error}</p>}
+      <span className="small muted">Unpaid items are also in Payments due on the Spending tab; pay from either place.</span>
     </section>
   );
 }

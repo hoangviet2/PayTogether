@@ -198,6 +198,18 @@ test('log expense: a split bill either way; paid becomes transactions, planned g
   assert.equal(t.previews.some((p) => p.id === paid.id), false);
 });
 
+test('shop item: only the buyer removes it, and only while unpaid', () => {
+  const t = s.createTrip('Shop', 'USD', ['Ana', 'Ben']);
+  const p = s.createPurchase(t, 1, { title: 'Adapter', url: 'https://x.com/a', cents: 1200 });
+  s.ordersCreated(t, p, ['', 'o1']);
+  assert.throws(() => s.deletePurchase(t, 0, p.id), /added this item/);
+  p.shares[1].status = 'approved';
+  assert.throws(() => s.deletePurchase(t, 1, p.id), /processing/);
+  p.shares[1].status = 'created';
+  assert.deepEqual(s.deletePurchase(t, 1, p.id), [`${p.id}-1`]);
+  assert.equal(t.previews.length + t.txs.length, 0);
+});
+
 test('delete trip: owner only, never once PayPal requests exist', () => {
   const t = s.createTrip('Del', 'USD', ['Ana', 'Ben']);
   assert.throws(() => s.deleteTrip(t, 1), /created the trip/);

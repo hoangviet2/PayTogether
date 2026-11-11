@@ -119,6 +119,18 @@ export function createPurchase(t: Trip, m: number, i: { title: string; url: stri
   t.previews.push(p);
   return p;
 }
+/** The buyer removes a Shop item they haven't paid: the bill and its unpaid transaction rows go. Returns the row ids. */
+export function deletePurchase(t: Trip, m: number, previewId: string): string[] {
+  const p = t.previews.find((x) => x.id === previewId && x.kind === 'shop') ?? reject('Unknown item.');
+  const buyer = p.shares.findIndex((s) => s.ratio_bp === 10000);
+  if (buyer !== m) reject('Only the person who added this item can remove it.');
+  if (p.shares[buyer].status === 'captured') reject('This item is paid, so it stays.');
+  if (p.shares[buyer].status === 'approved') reject('PayPal is processing this payment, so it can’t be removed now.');
+  const ids = t.txs.filter((x) => x.id.startsWith(`${p.id}-`)).map((x) => x.id);
+  t.txs = t.txs.filter((x) => !ids.includes(x.id));
+  dropPreview(t, p.id);
+  return ids;
+}
 export const dropPreview = (t: Trip, previewId: string) => { t.previews = t.previews.filter((p) => p.id !== previewId); };
 
 export const say = (t: Trip, from: number | 'ai', text: string) => t.chat.push({ from, at: now(), text });

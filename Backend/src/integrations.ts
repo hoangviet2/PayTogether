@@ -200,6 +200,12 @@ export async function deleteTripDocs(tripId: string) {
   await es.deleteByQuery({ index: INDEX, query: { term: { trip_id: tripId } }, ignore_unavailable: true, refresh: true });
 }
 
+/** Drops single transactions (a Shop item removed before it was paid). */
+export async function deleteTxnDocs(tripId: string, ids: string[]) {
+  if (!es || !ids.length) return;
+  await Promise.all(ids.map((id) => es.delete({ index: INDEX, id: `${tripId}:${id}` }, { ignore: [404] })));
+}
+
 /** The indexer. Only searchable fields go in: no PayPal emails, order ids or notes. */
 export async function indexTxn(tripId: string, t: Txn, people: Pick<Person, 'name'>[]) {
   if (!es) return;
