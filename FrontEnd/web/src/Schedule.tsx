@@ -1,7 +1,10 @@
-import { useRef, useState, type FormEvent, type Ref } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type Ref } from 'react';
+import { BryntumScheduler } from '@bryntum/scheduler-react-enterprise';
+import { StringHelper } from '@bryntum/core-enterprise';
+import './bryntum.css';
 import { money, payStage, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
-import { Chip, Icon, icons } from './ui';
+import { Icon, icons } from './ui';
 
 const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const weekday = (iso: string) => WEEK[new Date(iso + 'T00:00:00Z').getUTCDay()];
@@ -9,8 +12,6 @@ const short = (iso: string) => `${weekday(iso)} ${Number(iso.slice(8))}`;
 const legOn = (t: Trip, d: string) => t.legs.find((l) => d >= l.arrive_date && d < l.depart_date)?.destination.name ?? null;
 
 const isPayment = (t: Txn) => t.source !== 'On-trip log';
-// Same solid border for every block, however it was added; only the fill and the label show the payment status.
-const evtStyle = (t: Txn, c: string, tint: string) => ({ background: payStage(t.status) === 'Paid' ? tint : '#fff', borderColor: c, color: '#012169' });
 
 export function Schedule({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
@@ -37,56 +38,73 @@ export function Schedule({ ctx }: { ctx: Ctx }) {
   );
 }
 
+const day = (iso: string) => new Date(`${iso}T00:00:00`); // trip days are local calendar dates
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (iso_: string, n: number) => { const d = day(iso_); d.setDate(d.getDate() + n); return d; };
+
+/** Bryntum Scheduler: a top row for the stops, then one row per member with their transactions across the trip days.
+ * Read-only: changes happen in Log expense and Spending. Double-click your own row to log on that day. */
 function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: string) => void }) {
   const { trip, me } = ctx;
-  const cols = `170px repeat(${days.length}, minmax(84px, 1fr))`;
-  const place = (d: string, span = 1) => {
-    const k = Math.max(0, days.indexOf(d));
-    return { gridColumn: `${k + 1} / span ${Math.max(1, Math.min(span, days.length - k))}` };
-  };
-  const lane = { gridColumn: '2 / -1', display: 'grid', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`, gridAutoFlow: 'dense' as const, alignContent: 'center', gap: 4, padding: '6px 0' };
+  const resources = useMemo(() => [
+    { id: 'legs', name: 'Group · stops' },
+    ...trip.members.map((m, i) => ({ id: `m${i}`, name: `${m.symbol} ${m.name}${i === me ? ' (you)' : ''}`, eventColor: m.color })),
+  ], [trip.members, me]);
+  const txs = useMemo(() => new Map(trip.txs.map((t) => [`tx:${t.id}`, t])), [trip.txs]);
+  const events = useMemo(() => [
+    ...trip.legs.map((l) => ({
+      id: `leg:${l.id}`, resourceId: 'legs', name: `${l.destination.name} · ${l.nights} nights`,
+      startDate: day(l.arrive_date), endDate: day(l.depart_date), eventColor: '#003087',
+    })),
+    ...trip.txs.map((t) => ({
+      id: `tx:${t.id}`, resourceId: `m${t.member}`, name: `${t.vendor} · ${money(t.amount, trip.currency)} · ${payStage(t.status)}`,
+      startDate: day(t.date), endDate: addDays(t.date, t.nights ?? 1),
+      eventColor: trip.members[t.member]?.color,
+    })),
+  ], [trip.legs, trip.txs, trip.members, trip.currency]);
+  const columns = useMemo(() => [{ text: 'Who', field: 'name', width: 170 }], []);
+
   return (
     <>
       <div className="table-box">
-        <div style={{ minWidth: 170 + days.length * 84, fontSize: 13 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: cols, background: 'var(--bg)', borderBottom: '1px solid var(--line)' }}>
-            <span style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--body)' }}>Who</span>
-            {days.map((d) => <span key={d} style={{ padding: 10, fontWeight: 600, color: 'var(--body)' }}>{short(d)}</span>)}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: cols, borderBottom: '1px solid var(--line-2)' }}>
-            <span style={{ padding: '10px 12px', fontWeight: 600 }}>Group · legs</span>
-            <div style={lane}>
-              {trip.legs.map((l, k) => (
-                <span key={l.id} className={`evt ${['tone-blue', 'tone-orange', 'tone-gray'][k % 3]}`} style={{ ...place(l.arrive_date, l.nights), borderColor: 'transparent' }}>
-                  {l.destination.name} · {l.nights} nights
-                </span>
-              ))}
-              {!trip.legs.length && <span className="small muted" style={{ gridColumn: '1 / -1', padding: '0 8px' }}>No legs yet</span>}
-            </div>
-          </div>
-          {trip.members.map((m, i) => (
-            <div key={i} style={{ display: 'grid', gridTemplateColumns: cols, borderBottom: '1px solid var(--line-2)', minHeight: 56, background: i === me ? 'var(--bg)' : undefined }}>
-              <span className="row" style={{ padding: '10px 12px', gap: 8, fontWeight: 600 }}><Chip p={m} size={24} />{m.name}{i === me ? ' (you)' : ''}</span>
-              <div style={{ ...lane, cursor: i === me ? 'copy' : undefined }}
-                onDoubleClick={i === me ? (e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  onLog(days[Math.min(days.length - 1, Math.floor(((e.clientX - r.left) / r.width) * days.length))]);
-                } : undefined}>
-                {trip.txs.filter((t) => t.member === i && t.status !== 'failed').map((t) => {
-                  const label = <>{t.vendor} · {money(t.amount, trip.currency)} · {payStage(t.status)}</>;
-                  const props = { className: 'evt', style: { ...place(t.date, t.nights), ...evtStyle(t, m.color, m.tint) }, title: `${t.vendor} · ${money(t.amount, trip.currency)} · ${payStage(t.status)}${isPayment(t) ? '' : ' · logged expense'}` };
-                  // Payments (stays, in-store bills) open in Spending, where they're paid and tracked.
-                  return isPayment(t)
-                    ? <a key={t.id} {...props} href={`#/trip/${trip.id}/spending`} style={{ ...props.style, textDecoration: 'none' }} title={`${props.title} · open in Spending`}>{label}</a>
-                    : <span key={t.id} {...props}>{label}</span>;
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+        <BryntumScheduler
+          autoHeight
+          readOnly
+          viewPreset="dayAndMonth"
+          startDate={day(days[0])}
+          endDate={addDays(days.at(-1)!, 1)}
+          rowHeight={52}
+          barMargin={6}
+          columns={columns}
+          resources={resources}
+          events={events}
+          eventDragFeature={false}
+          eventResizeFeature={false}
+          eventDragCreateFeature={false}
+          eventEditFeature={false}
+          taskEditFeature={false}
+          eventMenuFeature={false}
+          scheduleMenuFeature={false}
+          cellMenuFeature={false}
+          headerMenuFeature={false}
+          zoomOnMouseWheel={false}
+          zoomOnTimeAxisDoubleClick={false}
+          eventRenderer={({ eventRecord, renderData }) => {
+            // Stops tonal; payments filled once paid, outlined while awaiting payment or verifying (the label says which).
+            const t = txs.get(String(eventRecord.id));
+            renderData.eventStyle = !t ? 'tonal' : payStage(t.status) === 'Paid' ? 'filled' : 'outlined';
+            renderData.iconCls = '';
+            return StringHelper.encodeHtml(eventRecord.name); // vendor names are user input
+          }}
+          onEventClick={({ eventRecord }) => {
+            const t = txs.get(String(eventRecord.id));
+            if (t && isPayment(t)) location.hash = `#/trip/${trip.id}/spending`; // payments are paid and tracked in Spending
+          }}
+          onScheduleDblClick={({ resourceRecord, date }) => { if (resourceRecord.id === `m${me}`) onLog(iso(date)); }}
+        />
       </div>
       <div className="row small muted" style={{ flexWrap: 'wrap', gap: 16 }}>
-        <span>Filled = paid · white = awaiting payment or verifying (the label says which). Click a payment to open it in Spending.</span>
+        <span>Filled = paid · outlined = awaiting payment or verifying (the label says which). Click a payment to open it in Spending.</span>
         <span>Other members’ rows are read-only.</span>
       </div>
     </>

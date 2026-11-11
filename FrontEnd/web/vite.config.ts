@@ -6,6 +6,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
     plugins: [react()],
+    // Bryntum themes use CSS light-dark(); an older CSS target drops their colors in the production build.
+    build: { cssTarget: ['chrome123', 'edge123', 'firefox120', 'safari17.5'] },
     server: {
       port: 5173,
       strictPort: true, // Log in with PayPal returns to this exact address (the Return URL), so never drift to 5174+

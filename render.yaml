@@ -69,6 +69,8 @@ services:
     envVars:
       - key: VITE_API_URL # the API service's URL, e.g. https://paytogether-api.onrender.com (baked in at build time)
         sync: false
+      - key: VITE_BRYNTUM_LICENSE # Bryntum Scheduler key for the Schedule tab; without it the build runs as a trial
+        sync: false
 
   - type: workflow
     name: paytogether-workflows
