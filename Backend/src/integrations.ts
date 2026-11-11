@@ -41,7 +41,7 @@ async function pp(path: string, body: unknown, requestId?: string) {
   const r = await fetch(`${PP}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await ppToken()}`, ...(requestId && { 'PayPal-Request-Id': requestId }) },
-    body: JSON.stringify(body),
+    body: typeof body === 'string' ? body : JSON.stringify(body), // a string is sent as-is (pre-built JSON)
   });
   const d = (await r.json()) as Record<string, any>;
   if (!r.ok) throw new Error(`PayPal ${path} ${r.status}: ${d.message ?? d.name ?? 'error'}`);
@@ -122,13 +122,15 @@ export async function captureOrder(orderId: string) {
   return pp(`/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {}, `capture-${orderId}`);
 }
 
-export async function verifyWebhook(h: Record<string, string | string[] | undefined>, event: unknown) {
+/** rawEvent: the webhook body exactly as received. PayPal checks the signature against those bytes, so it is spliced
+ * into the request unchanged; a re-serialized object (keys reordered) comes back FAILURE. */
+export async function verifyWebhook(h: Record<string, string | string[] | undefined>, rawEvent: string) {
   need(ready.paypal && ready.paypalWebhook, 'PAYPAL_WEBHOOK_ID');
-  const d = await pp('/v1/notifications/verify-webhook-signature', {
+  const fields = JSON.stringify({
     auth_algo: h['paypal-auth-algo'], cert_url: h['paypal-cert-url'], transmission_id: h['paypal-transmission-id'],
-    transmission_sig: h['paypal-transmission-sig'], transmission_time: h['paypal-transmission-time'],
-    webhook_id: env.PAYPAL_WEBHOOK_ID, webhook_event: event,
+    transmission_sig: h['paypal-transmission-sig'], transmission_time: h['paypal-transmission-time'], webhook_id: env.PAYPAL_WEBHOOK_ID,
   });
+  const d = await pp('/v1/notifications/verify-webhook-signature', `${fields.slice(0, -1)},"webhook_event":${rawEvent}}`);
   return d.verification_status === 'SUCCESS';
 }
 

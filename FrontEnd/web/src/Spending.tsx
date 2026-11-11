@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
-import { money, pct, summarizeTrip, type Txn } from '../../shared/trip';
+import { money, payStage, pct, summarizeTrip, type Txn } from '../../shared/trip';
 import { api, type Ctx } from './api';
 import { Icon, icons } from './ui';
 import { Bills, SplitBills, StoreBill } from './Bills';
@@ -28,7 +28,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
 
   const active = q.trim() ? hit : null;
   const rows = useMemo<Row[]>(
-    () => trip.txs.filter((t) => !active || active.ids.has(t.id)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map((t) => ({ ...t, memberName: trip.members[t.member].name, paidByName: trip.members[t.paid_by].name })),
+    () => trip.txs.filter((t) => payStage(t.status) === 'Paid' && (!active || active.ids.has(t.id))).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).map((t) => ({ ...t, memberName: trip.members[t.member].name, paidByName: trip.members[t.paid_by].name })),
     [trip.txs, trip.members, active],
   );
   const columnDefs = useMemo<ColDef<Row>[]>(() => {
@@ -47,7 +47,6 @@ export function Spending({ ctx }: { ctx: Ctx }) {
     { field: 'shareBp', headerName: 'Share', valueFormatter: (p) => (p.value == null ? '' : pct(p.value)), width: 100 },
     { field: 'paidByName', headerName: 'Paid by', width: 120, cellStyle: (p) => (p.data ? { color: trip.members[p.data.paid_by].color } : null) },
     { field: 'source', width: 140 },
-    { field: 'status', width: 110, cellClass: (p) => (p.value ? `status st-${p.value}` : '') },
   ];
   }, [trip.currency, trip.members]);
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []); // no header sorting; rows stay in date order
@@ -61,7 +60,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
       <div className="between" style={{ alignItems: 'center' }}>
         <div className="col" style={{ gap: 2 }}>
           <h2 style={{ fontSize: 20 }}>Spending</h2>
-          <span className="small muted">Everyone in the trip sees every transaction. PayPal emails and private notes are never indexed.</span>
+          <span className="small muted">Paid transactions only; unpaid shares stay in Bills and payments above. PayPal emails and private notes are never indexed.</span>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className={`btn ${adding ? 'btn-on' : 'btn-primary'}`} aria-expanded={adding} onClick={() => setAdding((v) => !v)}><Icon d={icons.plus} />Paid at a store</button>

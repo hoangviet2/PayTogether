@@ -39,16 +39,20 @@ const wayfinder = (t: Trip, trigger: string | null) => {
   runTurn(t, trigger, persist);
 };
 
-async function body<T>(req: IncomingMessage, schema: z.ZodType<T>): Promise<T> {
+async function rawBody(req: IncomingMessage) {
   let raw = '';
   for await (const chunk of req) {
     raw += chunk;
     if (raw.length > 100_000) throw new HttpError(413, 'Body too large');
   }
+  return raw;
+}
+function check<T>(raw: string, schema: z.ZodType<T>): T {
   const parsed = schema.safeParse(raw ? JSON.parse(raw) : {});
   if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
   return parsed.data;
 }
+const body = async <T,>(req: IncomingMessage, schema: z.ZodType<T>) => check(await rawBody(req), schema);
 
 /** Who is calling: the signed session from Log in with PayPal (x-session header). */
 function session(req: IncomingMessage) {
@@ -231,8 +235,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         if (!p || !share?.order_id) throw new HttpError(400, 'No payment request for you on this bill.');
         if (share.status === 'captured') throw new HttpError(409, 'You already paid this.');
         const st = await ext.orderStatus(share.order_id);
-        if (st === 'APPROVED') { await ext.captureOrder(share.order_id); return send({ orderId: share.order_id, approved: true }); }
-        if (st === 'COMPLETED') throw new HttpError(409, 'PayPal already has this payment; it will show as Paid shortly.');
+        if (st === 'APPROVED') {
+          const r = captureResult(await ext.captureOrder(share.order_id));
+          if (r) applyStatus(share.order_id, r);
+          return send({ orderId: share.order_id, approved: true });
+        }
+        if (st === 'COMPLETED') { // PayPal took it but its webhook never reached us: record it now
+          applyStatus(share.order_id, 'captured');
+          return send({ orderId: share.order_id, approved: true });
+        }
         if (!st || st === 'VOIDED') {
           share.order_id = await ext.createOrder({
             requestId: `${p.id}-${m}-${Date.now()}`, customId: `${t.id}:${p.id}:${m}`, cents: shareAmounts(p)![m], currency: p.currency,
@@ -248,7 +259,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         const p = t.previews.find((x) => x.id === d);
         const share = p?.shares[m];
         if (!share?.order_id) throw new HttpError(400, 'No payment request for you on this bill.');
-        await ext.captureOrder(share.order_id); // status changes only when PayPal's webhook arrives
+        // PayPal's capture response is authoritative (server to server), so a missing webhook can't leave it unpaid.
+        const r = captureResult(await ext.captureOrder(share.order_id));
+        if (r) applyStatus(share.order_id, r);
         return send({ ok: true });
       } else throw new HttpError(404, 'Not found');
       persist();
@@ -301,24 +314,39 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return send((await workflows.offload(ext.ready.kernel, 'close-checkout', [b], () => ext.closeCheckout(b).then(() => true)), { ok: true }));
 
   if (a === 'paypal' && b === 'webhook' && is('POST', 3)) {
-    const event = await body(req, z.object({ id: z.string(), event_type: z.string(), resource: z.record(z.string(), z.any()) }).passthrough());
-    if (!(await ext.verifyWebhook(req.headers, event))) throw new HttpError(400, 'Bad signature');
+    const raw = await rawBody(req);
+    const event = check(raw, z.object({ id: z.string(), event_type: z.string(), resource: z.record(z.string(), z.any()) }).passthrough());
+    // Verify the bytes PayPal sent: the parsed object has its keys reordered, which fails the signature check.
+    if (!(await ext.verifyWebhook(req.headers, raw))) {
+      console.error(`PayPal webhook ${event.id} (${event.event_type}) failed signature verification. Check PAYPAL_WEBHOOK_ID and that it belongs to this app.`);
+      throw new HttpError(400, 'Bad signature');
+    }
     if (seenEvents.has(event.id)) return send({ ok: true, duplicate: true });
     seenEvents.add(event.id);
     const r = event.resource as { id?: string; supplementary_data?: { related_ids?: { order_id?: string } } };
     const orderId = r.supplementary_data?.related_ids?.order_id ?? r.id;
     const status = ({ 'CHECKOUT.ORDER.APPROVED': 'approved', 'PAYMENT.CAPTURE.COMPLETED': 'captured', 'PAYMENT.CAPTURE.DENIED': 'failed', 'PAYMENT.CAPTURE.DECLINED': 'failed' } as const)[event.event_type as 'CHECKOUT.ORDER.APPROVED'];
-    const hit = status && orderId ? store.paymentStatus(orderId, status) : null;
-    if (hit) {
-      persist();
-      reindex(hit.trip, [hit.row]);
-      wayfinder(hit.trip, hit.event);
-    }
+    if (status && orderId) applyStatus(orderId, status);
     return send({ ok: true });
   }
 
   throw new HttpError(404, 'Not found');
 }
+
+/** Records a payment status that came from PayPal itself: a verified webhook, or our own server-to-server call
+ * (capture response, order lookup). Never from the browser. Idempotent: a capture is never downgraded. */
+function applyStatus(orderId: string, status: 'approved' | 'captured' | 'failed') {
+  const hit = store.paymentStatus(orderId, status);
+  if (!hit) return;
+  persist();
+  reindex(hit.trip, [hit.row]);
+  wayfinder(hit.trip, hit.event);
+}
+/** Status of a capture response from PayPal's API. */
+const captureResult = (d: Record<string, any>) => {
+  const c = d.purchase_units?.[0]?.payments?.captures?.[0]?.status ?? d.status;
+  return c === 'COMPLETED' ? 'captured' : c === 'DECLINED' || c === 'FAILED' ? 'failed' : null; // PENDING waits for the webhook
+};
 
 /** Everyone accepted: one PayPal order per member, then freeze the preview. */
 async function sendOrders(t: Trip, previewId: string, announce = true) {

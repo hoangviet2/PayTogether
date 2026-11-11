@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import {
-  CONFIRM_LABEL, PHASES, PHASE_LABEL, confirmBlocker, money, pct, ratioSum, shareAmounts, tripStatus,
+  CONFIRM_LABEL, PHASES, PHASE_LABEL, confirmBlocker, money, pct, ratioSum, rebalanceShares, shareAmounts, tripStatus,
   type Person, type Preview, type Share, type Trip,
 } from '../../shared/trip';
 import { api, useConfig, type Ctx } from './api';
@@ -217,6 +217,13 @@ export function Chat({ ctx }: { ctx: Ctx }) {
     </section>
   );
 }
+
+/** A % split being typed: member i types v and the others adjust in proportion (rebalanceShares), so it stays at 100%.
+ * Members at 0% stay off it. The typed text is kept as-is for i. */
+export const editPct = (pcts: string[], i: number, v: string) => {
+  const bp = (x: string) => Math.round((parseFloat(x) || 0) * 100);
+  return rebalanceShares(pcts.map(bp), i, bp(v)).map((b, j) => (j === i ? v : String(b / 100)));
+};
 
 const STATUS: Record<Share['status'], string> = { none: '', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
 

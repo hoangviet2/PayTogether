@@ -3,7 +3,7 @@ import { AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import { themeQuartz, type ColDef } from 'ag-grid-community';
 import { equalBps, money, pct, shareAmounts, type Preview, type Share } from '../../shared/trip';
 import type { Ctx } from './api';
-import { Icon, icons, PayShare, PreviewCard } from './ui';
+import { editPct, Icon, icons, PayShare, PreviewCard } from './ui';
 
 type Row = { id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
 type GridCtx = { pay: (r: Row) => void };
@@ -36,8 +36,6 @@ export function SplitBills({ ctx }: { ctx: Ctx }) {
 const status = (p: Preview, s: Share) => (p.frozen ? PAID[s.status] : 'Accepted · waiting for the others');
 
 function PayCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCtx>) {
-  if (data?.isMe && data.status === PAID.captured)
-    return <button type="button" className="btn btn-on" style={{ minHeight: 36 }} disabled><Icon d={icons.check} />Paid</button>;
   if (!data || !payable(data)) return null;
   return <button type="button" className="btn btn-primary" style={{ minHeight: 36 }} onClick={() => context.pay(data)}>Pay</button>;
 }
@@ -50,7 +48,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
 
   const rows = useMemo<Row[]>(() => trip.previews.flatMap((p) => {
     const cents = shareAmounts(p);
-    return p.shares.flatMap((s, i) => (!s.ratio_bp || (!s.accepted && !p.frozen) ? [] : [{
+    return p.shares.flatMap((s, i) => (!s.ratio_bp || s.status === 'captured' || (!s.accepted && !p.frozen) ? [] : [{ // paid: moves to the Spending grid
       id: `${p.id}-${i}`, previewId: p.id, bill: p.title, kind: KIND[p.kind], member: i, memberName: trip.members[i].name, isMe: i === me,
       bp: s.ratio_bp, cents: cents?.[i] ?? null, status: status(p, s), orderId: s.order_id,
     }]));
@@ -69,9 +67,9 @@ export function Bills({ ctx }: { ctx: Ctx }) {
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []);
   const context = useMemo<GridCtx>(() => ({ pay: setPaying }), []);
   const mine = rows.filter((r) => r.isMe && payable(r));
-  // PayPal's webhook marks the share captured (seen on the next 2 s poll): close the panel and say so.
-  if (paying && rows.find((r) => r.id === paying.id)?.status === PAID.captured) { // state adjusted during render, per React docs
-    setPaidMsg(`Payment successful: your share of ${paying.bill} is paid.`);
+  // Once PayPal confirms (seen on the next 2 s poll) the row leaves this grid for Spending: close the panel and say so.
+  if (paying && trip.previews.find((p) => p.id === paying.previewId)?.shares[paying.member].status === 'captured') { // state adjusted during render, per React docs
+    setPaidMsg(`Payment successful: your share of ${paying.bill} is paid. It’s now in the Spending list below.`);
     setPaying(null);
   }
 
@@ -142,7 +140,7 @@ export function StoreBill({ ctx, onDone }: { ctx: Ctx; onDone: () => void }) {
               <label key={i} className="row" style={{ gap: 6, fontSize: 14, minHeight: 44 }}>
                 <span style={{ color: m.color }}>{m.symbol}</span>{m.name}{i === me ? ' (you)' : ''}
                 <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
-                  onChange={(e) => setPcts((p) => p.map((v, j) => (j === i ? e.target.value : v)))} />%
+                  onChange={(e) => setPcts((p) => editPct(p, i, e.target.value))} />%
               </label>
             ))}
             <button type="button" className="btn" onClick={() => setPcts(trip.members.map((_, i) => (i === me ? '100' : '0')))}>I’ll pay 100%</button>

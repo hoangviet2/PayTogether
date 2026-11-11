@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent, type Ref } from 'react';
 import { equalBps, largestRemainder, money, payStage, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
-import { Chip, Icon, icons } from './ui';
+import { Chip, editPct, Icon, icons } from './ui';
 
 const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const weekday = (iso: string) => WEEK[new Date(iso + 'T00:00:00Z').getUTCDay()];
@@ -152,7 +152,7 @@ function LogExpense({ ref, ctx, day, days, onDone }: { ref: Ref<HTMLDialogElemen
               <label key={i} className="row" style={{ gap: 8, fontSize: 14, minHeight: 44 }}>
                 <Chip p={m} size={24} /><span style={{ flex: 1 }}>{m.name}{i === me ? ' (you)' : ''}</span>
                 <input value={pcts[i]} inputMode="decimal" aria-label={`${m.name}'s share in percent`} style={{ width: 70, minHeight: 40, border: '1px solid var(--input)', borderRadius: 10, padding: '0 8px' }}
-                  onChange={(e) => setPcts((p) => p.map((v, j) => (j === i ? e.target.value : v)))} />%
+                  onChange={(e) => setPcts((p) => editPct(p, i, e.target.value))} />%
                 <span className="mono" style={{ minWidth: 80, textAlign: 'right' }}>{shares ? money(shares[i], trip.currency) : '—'}</span>
               </label>
             ))}
