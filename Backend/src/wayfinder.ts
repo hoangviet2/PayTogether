@@ -11,7 +11,7 @@ import * as workflows from './workflows.ts';
 // Created on first use: the SDK throws without a key, and the server must still boot (chat then says it is offline).
 let client: OpenAI | undefined;
 const ai = () => (client ??= new OpenAI());
-const CHAT_MODEL = 'gpt-5-mini';
+const CHAT_MODEL = 'gpt-5.5';
 const CLASSIFIER_MODEL = 'gpt-5-mini';
 
 type Tool = { def: FunctionTool; run: (args: string) => Promise<string> };
