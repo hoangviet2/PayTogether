@@ -109,27 +109,56 @@ export function leave(t: Trip, m: number) {
   say(t, 'ai', `${name} left the trip.`);
 }
 
-/** Buy a Shop item with PayPal: a one-person bill for the price, paid to PayTogether's PayPal like the stays. */
+/** A Shop item: a split bill starting equal (the person who added it has accepted). Once everyone accepts, each pays
+ * their share to PayTogether's PayPal, like the stays. */
 export function createPurchase(t: Trip, m: number, i: { title: string; url: string; cents: number }): Preview {
   const p: Preview = {
-    id: id(), option_id: '', kind: 'shop', title: i.title, meta: `Shop · ${new URL(i.url).hostname} · bought by ${t.members[m].name}`, category: 'Store',
+    id: id(), option_id: '', kind: 'shop', title: i.title, meta: `Shop · ${new URL(i.url).hostname} · added by ${t.members[m].name}`, category: 'Store',
     total_cents: i.cents, currency: t.currency, prepaid: false, frozen: false, is_estimate: true,
-    shares: t.members.map((_, k) => ({ member: k, ratio_bp: k === m ? 10000 : 0, accepted: true, status: 'none' })),
+    shares: equalBps(t.members.length).map((ratio_bp, k) => ({ member: k, ratio_bp, accepted: t.members.length === 1 || k === m, status: 'none' as const })),
   };
   t.previews.push(p);
   return p;
 }
-/** The buyer removes a Shop item they haven't paid: the bill and its unpaid transaction rows go. Returns the row ids. */
-export function deletePurchase(t: Trip, m: number, previewId: string): string[] {
-  const p = t.previews.find((x) => x.id === previewId && x.kind === 'shop') ?? reject('Unknown item.');
-  const buyer = p.shares.findIndex((s) => s.ratio_bp === 10000);
-  if (buyer !== m) reject('Only the person who added this item can remove it.');
-  if (p.shares[buyer].status === 'captured') reject('This item is paid, so it stays.');
-  if (p.shares[buyer].status === 'approved') reject('PayPal is processing this payment, so it can’t be removed now.');
+
+/** Bills with PayPal money in motion or taken can't be re-split or deleted. */
+const moneyMoved = (p: Preview) => p.shares.some((s) => s.status === 'approved' || s.status === 'captured');
+/** Removes a bill's transaction rows (they show on the schedule). Returns their ids. */
+function dropRows(t: Trip, p: Preview) {
   const ids = t.txs.filter((x) => x.id.startsWith(`${p.id}-`)).map((x) => x.id);
   t.txs = t.txs.filter((x) => !ids.includes(x.id));
-  dropPreview(t, p.id);
   return ids;
+}
+
+/** Payments due → Split again: the PayPal requests are withdrawn and the bill goes back to Split bills for everyone to
+ * re-accept. Refused once anyone has paid or approved. Returns the dropped row ids. */
+export function splitAgain(t: Trip, m: number, previewId: string): string[] {
+  const p = t.previews.find((x) => x.id === previewId) ?? reject('Unknown bill.');
+  if (!p.shares[m]) reject('You are not on this bill.');
+  if (!p.frozen) reject('This bill is already in Split bills.');
+  if (moneyMoved(p)) reject('Someone has already paid part of this bill, so it can’t be split again.');
+  const ids = dropRows(t, p);
+  p.frozen = false;
+  p.delete_votes = [];
+  p.shares.forEach((s) => Object.assign(s, { order_id: undefined, status: 'none', accepted: !!p.payee && !s.ratio_bp }));
+  return ids;
+}
+
+/** Payments due → Delete. If one member pays 100%, only they can delete it, at once. Otherwise everyone on the bill
+ * must agree: each call toggles this member's vote, and the last vote deletes it (rows on the schedule too). */
+export function voteDelete(t: Trip, m: number, previewId: string): { deleted: boolean; ids: string[] } {
+  const p = t.previews.find((x) => x.id === previewId) ?? reject('Unknown bill.');
+  if (moneyMoved(p)) reject('Someone has already paid part of this bill, so it can’t be deleted.');
+  const on = p.shares.flatMap((s, i) => (s.ratio_bp ? [i] : []));
+  if (on.length === 1 && on[0] !== m) reject(`Only ${t.members[on[0]].name}, who pays 100%, can delete it.`);
+  if (!on.includes(m)) reject('You are not on this bill.');
+  const votes = new Set(p.delete_votes ?? []);
+  if (votes.has(m)) votes.delete(m); else votes.add(m);
+  p.delete_votes = [...votes];
+  if (!on.every((i) => votes.has(i))) return { deleted: false, ids: [] };
+  const ids = dropRows(t, p);
+  dropPreview(t, p.id);
+  return { deleted: true, ids };
 }
 export const dropPreview = (t: Trip, previewId: string) => { t.previews = t.previews.filter((p) => p.id !== previewId); };
 
@@ -338,8 +367,8 @@ export function accept(t: Trip, previewId: string, m: number): boolean {
   return readyToCharge(p);
 }
 
-/** Every share accepted on a bill that gets PayPal requests (prepaid stays, store bills). */
-export const readyToCharge = (p: Preview) => !p.frozen && (p.prepaid || !!p.payee) && p.shares.every((s) => s.accepted);
+/** Every share accepted on a bill that gets PayPal requests (prepaid stays and plans, store bills, Shop items). */
+export const readyToCharge = (p: Preview) => !p.frozen && (p.prepaid || !!p.payee || p.kind === 'shop') && p.shares.every((s) => s.accepted);
 
 function editablePreview(t: Trip, previewId: string) {
   const p = t.previews.find((x) => x.id === previewId) ?? reject('Unknown price preview.');

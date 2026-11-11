@@ -5,6 +5,7 @@ import { money, payStage, pct, summarizeTrip, type Txn } from '../../shared/trip
 import { api, type Ctx } from './api';
 import { Icon, icons } from './ui';
 import { Bills, SplitBills, StoreBill } from './Bills';
+import { Shop } from './Shop';
 
 type Row = Txn & { memberName: string };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
@@ -93,6 +94,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
         </span>
       </div>
     </section>
+    <Shop ctx={ctx} />
     </>
   );
 }

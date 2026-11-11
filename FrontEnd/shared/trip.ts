@@ -294,6 +294,7 @@ export type Share = { member: number; ratio_bp: number; accepted: boolean; statu
 export type Preview = {
   id: string; option_id: string; leg_id?: string; kind: 'stay' | 'dining' | 'store' | 'shop' | 'plan'; title: string; meta: string;
   date?: string; time?: string; // logged expenses: when it happened / happens
+  delete_votes?: number[]; // members on the bill who agreed to delete it from Payments due
   paid_by?: number; // logged expense someone already paid: once everyone accepts it becomes transactions, no PayPal
   payee?: { name: string; email: string }; category?: string; // store bills: each member pays the store's PayPal directly
   total_cents: number; currency: string; prepaid: boolean; shares: Share[]; frozen: boolean; is_estimate: true;

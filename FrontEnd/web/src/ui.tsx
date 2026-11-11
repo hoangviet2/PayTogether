@@ -84,7 +84,7 @@ async function remove({ trip }: Ctx) {
 export function TripHeader({ ctx, active }: { ctx: Ctx; active: string }) {
   const { trip, me } = ctx;
   const [copied, setCopied] = useState(false);
-  const tabs = ['plan', 'spending', 'schedule', 'dashboard', 'shop'];
+  const tabs = ['plan', 'spending', 'schedule', 'dashboard'];
   return (
     <header style={{ background: '#fff', borderBottom: '1px solid var(--line)' }}>
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '14px 24px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>

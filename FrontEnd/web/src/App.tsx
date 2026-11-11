@@ -8,9 +8,8 @@ import { Plan } from './Plan';
 import { Schedule } from './Schedule';
 import { Spending } from './Spending';
 import { Dashboard } from './Dashboard';
-import { Shop } from './Shop';
 
-// Routes: #/ landing (signed out) · #/home · #/trips · #/new · #/join · #/setup/{id} · #/trip/{id}/{plan|schedule|spending|dashboard|shop}
+// Routes: #/ landing (signed out) · #/home · #/trips · #/new · #/join · #/setup/{id} · #/trip/{id}/{plan|schedule|spending|dashboard}
 const useHash = () => {
   const [hash, setHash] = useState(location.hash);
   useEffect(() => {
@@ -33,7 +32,7 @@ export default function App() {
   if (setup) return <GroupSetup key={setup[1]} id={setup[1]} />;
   const m = route.match(/^trip\/([\w-]+)\/?(\w+)?/);
   if (!m) return <Home />; // #/, #/home and unknown routes
-  return <Workspace key={m[1]} id={m[1]} tab={m[2] ?? 'plan'} />;
+  return <Workspace key={m[1]} id={m[1]} tab={m[2] === 'shop' ? 'spending' : m[2] ?? 'plan'} />; // Shop now lives on Spending
 }
 
 function Workspace({ id, tab }: { id: string; tab: string }) {
@@ -71,7 +70,6 @@ function Workspace({ id, tab }: { id: string; tab: string }) {
           {tab === 'schedule' && <Schedule ctx={ctx} />}
           {tab === 'spending' && <Spending ctx={ctx} />}
           {tab === 'dashboard' && <Dashboard ctx={ctx} />}
-          {tab === 'shop' && <Shop ctx={ctx} />}
         </main>
       </div>
     </div>

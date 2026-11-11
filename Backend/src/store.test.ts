@@ -198,16 +198,30 @@ test('log expense: a split bill either way; paid becomes transactions, planned g
   assert.equal(t.previews.some((p) => p.id === paid.id), false);
 });
 
-test('shop item: only the buyer removes it, and only while unpaid', () => {
-  const t = s.createTrip('Shop', 'USD', ['Ana', 'Ben']);
+test('payments due: split again reopens an unpaid bill; delete needs everyone on it, or only the 100% payer', () => {
+  const t = s.createTrip('Due', 'USD', ['Ana', 'Ben', 'Cy']);
   const p = s.createPurchase(t, 1, { title: 'Adapter', url: 'https://x.com/a', cents: 1200 });
-  s.ordersCreated(t, p, ['', 'o1']);
-  assert.throws(() => s.deletePurchase(t, 0, p.id), /added this item/);
-  p.shares[1].status = 'approved';
-  assert.throws(() => s.deletePurchase(t, 1, p.id), /processing/);
-  p.shares[1].status = 'created';
-  assert.deepEqual(s.deletePurchase(t, 1, p.id), [`${p.id}-1`]);
-  assert.equal(t.previews.length + t.txs.length, 0);
+  assert.deepEqual(p.shares.map((x) => x.accepted), [false, true, false]);
+  s.accept(t, p.id, 0);
+  assert.equal(s.accept(t, p.id, 2), true); // shop items get PayPal requests
+  s.ordersCreated(t, p, ['o1', 'o2', 'o3']);
+  assert.equal(t.txs.length, 3);
+  assert.deepEqual(s.splitAgain(t, 0, p.id).length, 3);
+  assert.equal(p.frozen, false);
+  assert.equal(t.txs.length + p.shares.filter((x) => x.accepted || x.order_id).length, 0);
+
+  assert.equal(s.voteDelete(t, 0, p.id).deleted, false);
+  assert.equal(s.voteDelete(t, 1, p.id).deleted, false);
+  assert.equal(s.voteDelete(t, 2, p.id).deleted, true);
+  assert.equal(t.previews.length, 0);
+
+  const q = s.createPurchase(t, 0, { title: 'Map', url: 'https://x.com/m', cents: 500 });
+  s.setRatio(t, q.id, 2, 10000);
+  assert.throws(() => s.voteDelete(t, 0, q.id), /Only Cy/);
+  q.shares[2].status = 'approved';
+  assert.throws(() => s.voteDelete(t, 2, q.id), /already paid/);
+  q.shares[2].status = 'none';
+  assert.equal(s.voteDelete(t, 2, q.id).deleted, true);
 });
 
 test('delete trip: owner only, never once PayPal requests exist', () => {
@@ -241,6 +255,6 @@ test('leave: their messages, votes and confirmations go; positions shift; refuse
   s.createPurchase(t, 1, { title: 'Adapter', url: 'https://shop.example/a', cents: 1999 });
   assert.throws(() => s.leave(t, 1), /bills/);
   const p = t.previews[0];
-  assert.deepEqual([p.kind, p.shares.map((x) => x.ratio_bp)], ['shop', [0, 10000]]);
-  assert.equal(s.ordersCreated(t, p, ['', 'O9'])[0].source, 'Online purchase');
+  assert.deepEqual([p.kind, p.shares.map((x) => x.ratio_bp)], ['shop', [5000, 5000]]);
+  assert.equal(s.ordersCreated(t, p, ['O8', 'O9'])[0].source, 'Online purchase');
 });

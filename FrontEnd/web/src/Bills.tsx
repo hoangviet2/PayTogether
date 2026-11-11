@@ -5,8 +5,11 @@ import { equalBps, money, pct, shareAmounts, type Preview, type Share } from '..
 import type { Ctx } from './api';
 import { editPct, Icon, icons, PayShare, PreviewCard } from './ui';
 
-type Row = { id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string };
-type GridCtx = { pay: (r: Row) => void };
+type Row = {
+  id: string; previewId: string; bill: string; kind: string; member: number; memberName: string; isMe: boolean; bp: number; cents: number | null; status: string; orderId?: string;
+  frozen: boolean; locked: boolean; votes: number; needed: number; voted: boolean; solo: number | null; // for Split again / Delete
+};
+type GridCtx = { pay: (r: Row) => void; act: Ctx['act'] };
 const theme = themeQuartz.withParams({ fontFamily: 'Inter, system-ui, sans-serif', headerFontWeight: 600, accentColor: '#003087' });
 const KIND = { stay: 'Prepaid', dining: 'Prepaid', plan: 'Prepaid', store: 'In-store', shop: 'Online' } as const;
 const PAID: Record<Share['status'], string> = { none: '—', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
@@ -35,9 +38,30 @@ export function SplitBills({ ctx }: { ctx: Ctx }) {
 
 const status = (p: Preview, s: Share) => (p.frozen ? PAID[s.status] : 'Accepted · waiting for the others');
 
-function PayCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCtx>) {
-  if (!data || !payable(data)) return null;
-  return <button type="button" className="btn btn-primary" style={{ minHeight: 36 }} onClick={() => context.pay(data)}>Pay</button>;
+/** Your row's actions. Split again / Delete act on the whole bill, and only while nobody has paid or approved any of it. */
+function ActionsCell({ data, context }: CustomCellRendererProps<Row, unknown, GridCtx>) {
+  if (!data?.isMe) return null;
+  const r = data;
+  const canDelete = !r.locked && (r.solo == null || r.solo === r.member);
+  const lastVote = r.solo === r.member || (!r.voted && r.votes + 1 === r.needed);
+  const del = () => {
+    if (lastVote && !confirm(`Delete ${r.bill}? It's removed from Payments due and the Schedule for everyone.`)) return;
+    context.act(`/previews/${r.previewId}/delete`);
+  };
+  const again = () => { if (confirm(`Send ${r.bill} back to Split bills? Everyone sets their share and accepts again.`)) context.act(`/previews/${r.previewId}/split-again`); };
+  const sm = { minHeight: 36, padding: '0 10px' };
+  return (
+    <span className="row" style={{ gap: 6, height: '100%' }}>
+      {payable(r) && <button type="button" className="btn btn-primary" style={sm} onClick={() => context.pay(r)}>Pay</button>}
+      {r.frozen && !r.locked && <button type="button" className="btn" style={sm} onClick={again}>Split again</button>}
+      {canDelete && (
+        <button type="button" className={`btn ${r.voted ? 'btn-on' : ''}`} style={sm} onClick={del} aria-pressed={r.solo == null ? r.voted : undefined}
+          title={r.solo == null ? 'Everyone on the bill must agree to delete it' : 'You pay 100%, so you can delete it'}>
+          {r.solo != null ? 'Delete' : `${r.voted ? 'Undo delete' : 'Delete'} · ${r.votes}/${r.needed}`}
+        </button>
+      )}
+    </span>
+  );
 }
 
 /** Spending tab: every share someone has accepted, with its payment status. Paying happens here, when each person is ready. */
@@ -48,26 +72,31 @@ export function Bills({ ctx }: { ctx: Ctx }) {
 
   const rows = useMemo<Row[]>(() => trip.previews.filter((p) => p.paid_by == null).flatMap((p) => { // already-paid expenses have nothing to pay
     const cents = shareAmounts(p);
+    const on = p.shares.flatMap((s, i) => (s.ratio_bp ? [i] : []));
+    const votes = p.delete_votes ?? [];
+    const bill = { frozen: p.frozen, locked: p.shares.some((s) => s.status === 'approved' || s.status === 'captured'), votes: votes.length, needed: on.length, solo: on.length === 1 ? on[0] : null };
     return p.shares.flatMap((s, i) => (!s.ratio_bp || s.status === 'captured' || (!s.accepted && !p.frozen) ? [] : [{ // paid: moves to the Spending grid
       id: `${p.id}-${i}`, previewId: p.id, bill: p.title, kind: KIND[p.kind], member: i, memberName: trip.members[i].name, isMe: i === me,
-      bp: s.ratio_bp, cents: cents?.[i] ?? null, status: status(p, s), orderId: s.order_id,
+      bp: s.ratio_bp, cents: cents?.[i] ?? null, status: status(p, s), orderId: s.order_id, ...bill, voted: votes.includes(i),
     }]));
   }), [trip.previews, trip.members, me]);
 
   const columnDefs = useMemo<ColDef<Row>[]>(() => [
-    { field: 'bill', headerName: 'Bill', flex: 2, minWidth: 160 },
+    { field: 'bill', headerName: 'Bill', flex: 2, minWidth: 160, valueFormatter: (p) => (p.data?.votes && p.data.solo == null ? `${p.value} · delete requested ${p.data.votes}/${p.data.needed}` : p.value) },
     { field: 'kind', headerName: 'Type', width: 110 },
     { field: 'memberName', headerName: 'Account', width: 150, valueFormatter: (p) => (p.data ? `${trip.members[p.data.member].symbol} ${p.value}${p.data.isMe ? ' (you)' : ''}` : p.value),
       cellStyle: (p) => (p.data ? { color: trip.members[p.data.member].color, fontWeight: 600 } : null) },
     { field: 'bp', headerName: 'Share', width: 100, valueFormatter: (p) => (p.value == null ? '' : pct(p.value)) },
     { field: 'cents', headerName: 'Amount', type: 'rightAligned', width: 120, valueFormatter: (p) => (p.value == null ? '—' : money(p.value, trip.currency)) },
-    { headerName: '', colId: 'pay', width: 130, cellRenderer: PayCell, sortable: false, filter: false },
+    { headerName: '', colId: 'actions', width: 330, cellRenderer: ActionsCell, sortable: false, filter: false },
   ], [trip.currency, trip.members]);
   const defaultColDef = useMemo<ColDef>(() => ({ sortable: false, filter: true, resizable: true }), []);
-  const context = useMemo<GridCtx>(() => ({ pay: setPaying }), []);
+  const context = useMemo<GridCtx>(() => ({ pay: setPaying, act: ctx.act }), [ctx.act]);
   const mine = rows.filter((r) => r.isMe && payable(r));
   // Once PayPal confirms (seen on the next 2 s poll) the row leaves this grid for Spending: close the panel and say so.
-  if (paying && trip.previews.find((p) => p.id === paying.previewId)?.shares[paying.member].status === 'captured') { // state adjusted during render, per React docs
+  const payingBill = paying && trip.previews.find((p) => p.id === paying.previewId);
+  if (paying && (!payingBill || !payingBill.frozen)) setPaying(null); // split again or deleted while the panel was open
+  else if (paying && payingBill && payingBill.shares[paying.member].status === 'captured') { // state adjusted during render, per React docs
     setPaidMsg(`Payment successful: your share of ${paying.bill} is paid. It’s now in the Spending list below.`);
     setPaying(null);
   }
@@ -78,7 +107,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
         <div className="col" style={{ gap: 2 }}>
           <span className="eyebrow" style={{ color: 'var(--orange-ink)' }}>Action required</span>
           <h2 id="bills-h" style={{ fontSize: 20 }}>Payments due</h2>
-          <span className="small muted">Unpaid shares only. Once a payment goes through it moves to the Spending list below.{mine.length ? ` You have ${mine.length} to pay.` : ''}</span>
+          <span className="small muted">Unpaid shares only. Once a payment goes through it moves to the Spending list below. Split again sends a bill back to Split bills; Delete needs everyone on the bill, or just the person paying 100%.{mine.length ? ` You have ${mine.length} to pay.` : ''}</span>
         </div>
       </div>
       {paidMsg && (

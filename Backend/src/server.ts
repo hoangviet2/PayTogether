@@ -167,16 +167,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     }
     if (c === 'purchases' && is('POST', 4)) {
       const i = await body(req, z.object({ title: z.string().trim().min(1).max(120), url: z.string().url().refine((u) => u.startsWith('https://'), 'https only'), cents: z.number().int().positive().max(100_000_00) }));
-      const p = store.createPurchase(t, m, i);
-      // The buyer is the only one on it, so the PayPal order goes out right away; no order, no bill.
-      try { await sendOrders(t, p.id, false); } catch (e) { store.dropPreview(t, p.id); throw e; }
+      const p = store.createPurchase(t, m, i); // goes to Split bills
+      await settleIfReady(t, p.id); // a solo trip has nobody else to wait for
       persist();
-      return send({ trip: t, previewId: p.id });
-    }
-    if (c === 'purchases' && d && is('DELETE', 5)) {
-      const ids = store.deletePurchase(t, m, d);
-      persist();
-      ext.deleteTxnDocs(t.id, ids).catch((e) => console.error('Elastic cleanup failed:', e.message));
       return send(t);
     }
     if (is('DELETE', 3)) {
@@ -232,6 +225,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         wayfinder(t, store.setRatio(t, d, m, bp));
         await settleIfReady(t, d); // someone took 100%
       } else if (e === 'equal' && is('POST', 6)) store.resetEqual(t, d, m);
+      else if ((e === 'split-again' || e === 'delete') && is('POST', 6)) {
+        const r = e === 'delete' ? store.voteDelete(t, m, d) : { deleted: false, ids: store.splitAgain(t, m, d) };
+        ext.deleteTxnDocs(t.id, r.ids).catch((err) => console.error('Elastic cleanup failed:', err.message));
+      }
       else if (e === 'accept' && is('POST', 6)) {
         store.accept(t, d, m);
         await settleIfReady(t, d);
