@@ -12,7 +12,7 @@ const KIND = { stay: 'Prepaid', dining: 'Prepaid', plan: 'Prepaid', store: 'In-s
 const PAID: Record<Share['status'], string> = { none: '—', created: 'Awaiting payment', approved: 'Verifying', captured: 'Paid', failed: 'Payment failed' };
 const payable = (r: Row) => r.isMe && !!r.orderId && (r.status === PAID.created || r.status === PAID.failed);
 
-/** Spending tab, top: bills still being split. Once everyone on a bill accepts, it moves to Bills and payments. */
+/** Spending tab, top: bills still being split. Once everyone on a bill accepts, it moves to Payments due. */
 export function SplitBills({ ctx }: { ctx: Ctx }) {
   const { trip } = ctx;
   const open = trip.previews.filter((p) => !p.frozen);
@@ -22,10 +22,10 @@ export function SplitBills({ ctx }: { ctx: Ctx }) {
       <div className="col" style={{ gap: 2 }}>
         <h2 id="split-h" style={{ fontSize: 20 }}>{trip.solo ? 'Your bills' : 'Split bills'}</h2>
         <span className="small muted">{trip.solo
-          ? 'Every bill is 100% yours. Accept one to move it to Bills and payments.'
-          : 'Move your own bar; the others adjust so shares always add up to 100%. When everyone accepts, the bill moves to Bills and payments.'}</span>
+          ? 'Every bill is 100% yours. Accept one to move it to Payments due.'
+          : 'Move your own bar; the others adjust so shares always add up to 100%. When everyone accepts, the bill moves to Payments due.'}</span>
       </div>
-      {!open.length && <p className="card muted">Everyone has accepted every bill. Pay your shares in Bills and payments below.</p>}
+      {!open.length && <p className="card muted">Everyone has accepted every bill. Pay your shares in Payments due below.</p>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>
         {open.map((p) => <PreviewCard key={p.id} ctx={ctx} p={p} />)}
       </div>
@@ -77,8 +77,9 @@ export function Bills({ ctx }: { ctx: Ctx }) {
     <section aria-labelledby="bills-h" className="card">
       <div className="between" style={{ alignItems: 'center' }}>
         <div className="col" style={{ gap: 2 }}>
-          <h2 id="bills-h" style={{ fontSize: 20 }}>Bills and payments</h2>
-          <span className="small muted">Shares show up here once accepted. When everyone on a bill has accepted, pay your share whenever you’re ready.{mine.length ? ` You have ${mine.length} to pay.` : ''}</span>
+          <span className="eyebrow" style={{ color: 'var(--orange-ink)' }}>Action required</span>
+          <h2 id="bills-h" style={{ fontSize: 20 }}>Payments due</h2>
+          <span className="small muted">Unpaid shares only. Once a payment goes through it moves to the Spending list below.{mine.length ? ` You have ${mine.length} to pay.` : ''}</span>
         </div>
       </div>
       {paidMsg && (
@@ -90,7 +91,7 @@ export function Bills({ ctx }: { ctx: Ctx }) {
       {rows.length ? (
         <AgGridReact<Row> theme={theme} rowData={rows} columnDefs={columnDefs} defaultColDef={defaultColDef} getRowId={(p) => p.data.id}
           context={context} domLayout="autoHeight" rowHeight={48} />
-      ) : <p className="muted small">Nothing accepted yet.</p>}
+      ) : <p className="muted small">Nothing to pay right now.</p>}
       {paying?.orderId && (
         <div className="col" style={{ gap: 10, borderTop: '1px solid var(--line-2)', paddingTop: 14 }}>
           <div className="between" style={{ alignItems: 'center' }}>

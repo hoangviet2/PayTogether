@@ -60,7 +60,7 @@ export function Spending({ ctx }: { ctx: Ctx }) {
       <div className="between" style={{ alignItems: 'center' }}>
         <div className="col" style={{ gap: 2 }}>
           <h2 style={{ fontSize: 20 }}>Spending</h2>
-          <span className="small muted">Paid transactions only; unpaid shares stay in Bills and payments above. PayPal emails and private notes are never indexed.</span>
+          <span className="small muted">Paid transactions only; unpaid shares stay in Payments due above. PayPal emails and private notes are never indexed.</span>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className={`btn ${adding ? 'btn-on' : 'btn-primary'}`} aria-expanded={adding} onClick={() => setAdding((v) => !v)}><Icon d={icons.plus} />Paid at a store</button>

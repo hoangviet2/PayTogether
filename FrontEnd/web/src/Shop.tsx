@@ -30,7 +30,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
     }
   };
 
-  // Same flow as Pay in Spending: a PayPal order for the price, then PayPal opens here. It also lands in Bills and payments.
+  // Same flow as Pay in Spending: a PayPal order for the price, then PayPal opens here. It also lands in Payments due.
   const checkout = async (h: Hit) => {
     const offer = h.offers[0];
     setError(null);
@@ -99,7 +99,7 @@ export function Shop({ ctx }: { ctx: Ctx }) {
             <button type="button" className="btn" onClick={() => setPaying(null)}>Close</button>
           </div>
           <PayShare key={paying.orderId} ctx={ctx} previewId={paying.previewId} orderId={paying.orderId} currency={trip.currency} autoOpen label={`Pay ${money(paying.cents, trip.currency)}`} />
-          <p className="small muted">It’s also in Bills and payments on the Spending tab, so you can pay it later from there.</p>
+          <p className="small muted">It’s also in Payments due on the Spending tab, so you can pay it later from there.</p>
         </section>
       )}
     </>
@@ -146,7 +146,7 @@ function Orders({ ctx }: { ctx: Ctx }) {
         <div className="between small"><dt className="muted">Not paid yet</dt><dd className="mono" style={{ margin: 0 }}>{money(sum((s) => s !== 'captured'), trip.currency)}</dd></div>
         <div className="between" style={{ borderTop: '1px solid var(--line)', paddingTop: 8, fontWeight: 600 }}><dt>Total</dt><dd className="mono" style={{ margin: 0 }}>{money(sum(() => true), trip.currency)}</dd></div>
       </dl>
-      <span className="small muted">Unpaid items can be paid from Bills and payments on the Spending tab.</span>
+      <span className="small muted">Unpaid items can be paid from Payments due on the Spending tab.</span>
     </section>
   );
 }
