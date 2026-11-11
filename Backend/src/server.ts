@@ -3,7 +3,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { mySummary, searchTxns, shareAmounts, type Preview, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
+import { PHASES, mySummary, searchTxns, shareAmounts, type Preview, type Trip, type Txn } from '../../FrontEnd/shared/trip.ts';
 import * as store from './store.ts';
 import * as ext from './integrations.ts';
 import { runTool, runTurn, shouldReply, turnContext } from './wayfinder.ts';
@@ -30,8 +30,12 @@ const reindex = (t: Trip, rows: Txn[]) => {
   rows.forEach((r) => ext.indexTxn(t.id, r, people).catch((e) => console.error('Elastic index failed:', e.message)));
 };
 const OFFLINE = 'I am offline: set OPENAI_API_KEY in Backend/.env and restart the server.';
-const wayfinder = (t: Trip, trigger: string | null) => {
+// Wayfinder lives in the planning chat. After Places is confirmed it stays quiet about app events (splits, payments,
+// expenses); it still answers members who write in the chat, e.g. to replan, and still prices a stay it was told it couldn't.
+const planning = (t: Trip) => PHASES.indexOf(t.phase) <= PHASES.indexOf('PLACES');
+const wayfinder = (t: Trip, trigger: string | null, fromMember = false) => {
   if (!trigger) return;
+  if (!fromMember && !planning(t) && !trigger.includes('Could not price')) return;
   if (!ext.ready.ai) {
     if (!t.chat.some((c) => c.text === OFFLINE)) store.say(t, 'ai', OFFLINE); // once per trip, not after every message
     return persist();
@@ -192,7 +196,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       store.say(t, m, text);
       persist();
       send(t);
-      if (!ext.ready.ai || (await shouldReply(t, text).catch(() => /wayfinder/i.test(text)))) wayfinder(t, `${t.members[m].name} said: ${text}`);
+      if (!ext.ready.ai || (await shouldReply(t, text).catch(() => /wayfinder/i.test(text)))) wayfinder(t, `${t.members[m].name} said: ${text}`, true);
       return;
     }
     if (c === 'confirm' && is('POST', 4)) {
@@ -281,7 +285,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const phone = email ? undefined : /^\+?[\d\s().-]{7,20}$/.test(i.contact) ? i.contact.replace(/[^\d+]/g, '') : undefined;
       if (!email && !phone) throw new HttpError(400, 'Enter the vendor’s PayPal email or phone number.');
       const p = store.createStorePay(t, m, { ...i, email, phone });
-      try { await sendOrders(t, p.id, false); } catch (e) { store.dropPreview(t, p.id); throw e; }
+      try { await sendOrders(t, p.id); } catch (e) { store.dropPreview(t, p.id); throw e; }
       persist();
       return send({ trip: t, previewId: p.id });
     }
@@ -403,7 +407,7 @@ async function settleIfReady(t: Trip, previewId: string) {
 }
 
 /** Everyone accepted: one PayPal order per member, then freeze the preview. */
-async function sendOrders(t: Trip, previewId: string, announce = true) {
+async function sendOrders(t: Trip, previewId: string) {
   const p = t.previews.find((x) => x.id === previewId)!;
   const cents = shareAmounts(p)!;
   const payers = p.shares.flatMap((s, i) => (s.ratio_bp ? [i] : [])); // 0% shares get no order
@@ -414,7 +418,6 @@ async function sendOrders(t: Trip, previewId: string, announce = true) {
   const ids = await workflows.offload(ext.ready.paypal, 'paypal-orders', [orders], () => Promise.all(orders.map(ext.createOrder)));
   const rows = store.ordersCreated(t, p, p.shares.map((_, i) => ids[payers.indexOf(i)] ?? ''));
   reindex(t, rows);
-  if (announce) store.say(t, 'ai', `Everyone accepted ${p.title}. Your share is in Payments due on the Spending tab; pay it from there whenever you're ready.`);
 }
 
 createServer((req, res) => {
