@@ -210,6 +210,7 @@ test('payments due: split again reopens an unpaid bill; delete needs everyone on
   s.accept(t, p.id, 0);
   assert.equal(s.accept(t, p.id, 2), true); // shop items get PayPal requests
   s.ordersCreated(t, p, ['o1', 'o2', 'o3']);
+  assert.deepEqual(s.ordersCreated(t, p, ['o1', 'o2', 'o3']), []); // a second request racing the PayPal call adds no duplicate rows
   assert.equal(t.txs.length, 3);
   assert.deepEqual(s.splitAgain(t, 0, p.id).length, 3);
   assert.equal(p.frozen, false);

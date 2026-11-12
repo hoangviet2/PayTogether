@@ -18,6 +18,7 @@ for (const t of trips.values()) {
   t.code ??= newCode(); // trips saved before join codes existed
   t.busy = false; // a Wayfinder turn cut off by a restart must not leave the chat stuck on "thinking"
   recolor(t); // trips saved with the old palette
+  t.txs = [...new Map(t.txs.map((x) => [x.id, x])).values()]; // rows doubled by the old ordersCreated race
 }
 // Everyone who has logged in, so a trip owner can invite an account by its PayPal email. Kept beside the trips file.
 const USERS_FILE = FILE.replace(/(\.json)?$/, '.users.json');
@@ -379,6 +380,7 @@ function editablePreview(t: Trip, previewId: string) {
 
 /** Freeze the preview and add one 'created' transaction per member (one row per member per money event). */
 export function ordersCreated(t: Trip, p: Preview, orderIds: string[]): Txn[] {
+  if (p.frozen) return []; // a concurrent request already sent this bill's orders while PayPal was answering
   const cents = shareAmounts(p)!;
   const leg = t.legs.find((l) => l.id === p.leg_id);
   p.frozen = true;
