@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent, type Ref } from 'react';
 import { BryntumScheduler } from '@bryntum/scheduler-react-enterprise';
 import { StringHelper } from '@bryntum/core-enterprise';
+import type { Scheduler } from '@bryntum/scheduler-enterprise';
 import './bryntum.css';
 import { money, payStage, tripDays, type Trip, type Txn } from '../../shared/trip';
 import type { Ctx } from './api';
@@ -92,7 +93,7 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
           headerMenuFeature={false}
           zoomOnMouseWheel={false}
           zoomOnTimeAxisDoubleClick={false}
-          onPaint={({ source, firstPaint }) => { if (firstPaint) source.scrollToDate(day(days[0]), { block: 'start' }); }} // open on the trip, not on early purchases
+          onPaint={({ source, firstPaint }) => { if (firstPaint) (source as Scheduler).scrollToDate(day(days[0]), { block: 'start' }); }} // open on the trip, not on early purchases
           eventRenderer={({ eventRecord, renderData }) => {
             // Stops tonal; payments filled once paid, outlined while awaiting payment or verifying (the label says which).
             const t = txs.get(String(eventRecord.id));
