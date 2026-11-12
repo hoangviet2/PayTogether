@@ -63,6 +63,9 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
     })),
   ], [trip.legs, trip.txs, trip.members, trip.currency]);
   const columns = useMemo(() => [{ text: 'Who', field: 'name', width: 170 }], []);
+  // Shop items and Pay at a store are dated the day they're bought, often before or after the trip: widen the range to show them.
+  const first = [days[0], ...trip.txs.map((t) => t.date)].sort()[0];
+  const last = trip.txs.reduce((a, t) => (iso(addDays(t.date, t.nights ?? 1)) > a ? iso(addDays(t.date, t.nights ?? 1)) : a), iso(addDays(days.at(-1)!, 1)));
 
   return (
     <>
@@ -71,8 +74,8 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
           autoHeight
           readOnly
           viewPreset="dayAndMonth"
-          startDate={day(days[0])}
-          endDate={addDays(days.at(-1)!, 1)}
+          startDate={day(first)}
+          endDate={day(last)}
           rowHeight={52}
           barMargin={6}
           columns={columns}
@@ -89,6 +92,7 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
           headerMenuFeature={false}
           zoomOnMouseWheel={false}
           zoomOnTimeAxisDoubleClick={false}
+          onPaint={({ source, firstPaint }) => { if (firstPaint) source.scrollToDate(day(days[0]), { block: 'start' }); }} // open on the trip, not on early purchases
           eventRenderer={({ eventRecord, renderData }) => {
             // Stops tonal; payments filled once paid, outlined while awaiting payment or verifying (the label says which).
             const t = txs.get(String(eventRecord.id));
