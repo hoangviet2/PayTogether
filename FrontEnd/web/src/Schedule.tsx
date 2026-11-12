@@ -57,12 +57,12 @@ function Timeline({ ctx, days, onLog }: { ctx: Ctx; days: string[]; onLog: (d: s
       id: `leg:${l.id}`, resourceId: 'legs', name: `${l.destination.name} · ${l.nights} nights`,
       startDate: day(l.arrive_date), endDate: day(l.depart_date), eventColor: '#003087',
     })),
-    ...trip.txs.map((t) => ({
+    ...[...txs.values()].map((t) => ({ // the id map, so a doubled row can't crash Bryntum ("Id collision")
       id: `tx:${t.id}`, resourceId: `m${t.member}`, name: `${t.vendor} · ${money(t.amount, trip.currency)} · ${payStage(t.status)}`,
       startDate: day(t.date), endDate: addDays(t.date, t.nights ?? 1),
       eventColor: trip.members[t.member]?.color,
     })),
-  ], [trip.legs, trip.txs, trip.members, trip.currency]);
+  ], [trip.legs, txs, trip.members, trip.currency]);
   const columns = useMemo(() => [{ text: 'Who', field: 'name', width: 170 }], []);
   // Shop items and Pay at a store are dated the day they're bought, often before or after the trip: widen the range to show them.
   const first = [days[0], ...trip.txs.map((t) => t.date)].sort()[0];
