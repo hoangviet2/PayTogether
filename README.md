@@ -355,8 +355,8 @@ sequenceDiagram
 
 ## Team
 
-- TODO
-- TODO
+- **Anh (Vivian) Vo** · [@anhvo2211](https://github.com/anhvo2211)
+- **Viet (Ben) Hoang** · [@hoangviet2](https://github.com/hoangviet2)
 
 Licensed under the [GNU General Public License v3.0](LICENSE).
 
@@ -369,8 +369,8 @@ Licensed under the [GNU General Public License v3.0](LICENSE).
 
    | Sandbox account | Email | Password |
    |---|---|---|
-   | Traveler A | TODO | TODO |
-   | Traveler B | TODO | TODO |
+   | Traveler A | `sb-w9vwu53882014@personal.example.com` | `TestPayTogether` |
+   | Traveler B | `sb-a5zb4753882035@personal.example.com` | `TestPayTogether` |
 
    Open a second browser (or a private window) for Traveler B, so you can see two people pay separately.
 3. As Traveler A: **New trip → With a group**. Share the 6-character join code shown on the setup page. Traveler B enters it under **Join**. (Or pick **Just me** for a solo trip.)
