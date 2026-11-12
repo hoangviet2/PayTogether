@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  🎥 <b>Demo video:</b> coming soon · 🌐 <b>Live demo:</b> <a href="https://paytogether-web.onrender.com/">paytogether-web.onrender.com</a> · 📝 <b>Devpost:</b> TODO
+  🎥 <b>Demo video:</b> <a href="https://youtu.be/_tzAlkr8_Fw">YouTube</a> · 🌐 <b>Live demo:</b> <a href="https://paytogether-web.onrender.com/">paytogether-web.onrender.com</a> · 📝 <b>Devpost:</b> <a href="https://devpost.com/software/pay-together">pay-together</a>
 </p>
 
 <p align="center"><a href="#for-judges-try-it-in-2-minutes"><b>→ Judges: try it in 2 minutes</b></a></p>
