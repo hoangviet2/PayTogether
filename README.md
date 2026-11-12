@@ -25,9 +25,21 @@
 
 ## 💡 Inspiration: the problem
 
-On a group trip one person usually books the hotel on their own card, then spends weeks collecting money: screenshots of bank transfers, a shared spreadsheet, reminders in the group chat, and the friend who "will pay you back next time". The organizer also does all the planning work: picking places, matching dates and comparing prices.
+Where you want to go. What you need to buy. Who's coming. Every group trip starts with excitement in the group chat, and then reality sets in.
 
-Split-the-bill apps only **record** debts after someone has already paid. The debt still exists.
+**Planning is a part-time job.** Expedia Group's *Path to Purchase* study found that travelers spend **303 minutes (over 5 hours)** with travel content and view **141 pages** in the 45 days before booking a trip. U.S. travelers view as many as **277**. That's for *one* person. Add a group of friends with different opinions, and the work falls on whoever volunteers to "figure it out."
+
+**Money is where friendships crack.** In Experian's June 2025 survey of people who travel with friends, **unexpected costs** and **splitting costs fairly** were the two biggest financial stress points across every generation. More than **half of Gen Z and millennial travelers** have had a money disagreement with friends on a trip, **1 in 5** has ended a friendship over money, and only **1 in 4** friend groups sets a budget upfront.
+
+**Whoever fronts the money pays the price.** Zelle's *Avoidance Economy* report found that **76%** of Gen Z who covered a group expense were never fully repaid, and **47%** went into debt because of it. **1 in 5** has canceled plans or muted the group chat just to avoid a conversation about paying someone back. The chat where the trip was born becomes the place people hide.
+
+**So people pay a "peace tax."** A 2026 CIT Bank survey conducted by The Harris Poll found that **82%** of group travelers are willing to pay more than their fair share to avoid a money argument, rising to **90%** among Gen Z. And **72%** of Gen Z group travelers have already had money problems on a trip.
+
+**These travelers are already on PayPal.** According to SimilarWeb traffic data, **25–34** is PayPal's largest age group (**27.6%**), and **18–24** adds another **19.0%**. That puts **nearly half** of PayPal's audience under 35, the same generation that struggles most with group-trip money.
+
+So we asked: *what if the trip planned itself in the chat where it already starts, and no one ever had to front the money?*
+
+That's **PayTogether**.
 
 PayTogether was built during the PayPal AI Hackathon submission period (Oct 1 – Nov 12, 2026); the first commit is from Nov 7, 2026.
 
@@ -75,6 +87,38 @@ The flow from a new account:
 3. **Plan** tab: chat with Wayfinder, confirm Destinations → Timeline → Places (everyone confirms each phase, stays are picked by poll).
 4. **Spending** tab: split bills open automatically for the winning stays; each member adjusts only their own share, accepts, and pays.
 5. **Schedule** and **Dashboard**: every payment moves **Awaiting payment → Verifying → Paid**, with each member's color *and* symbol.
+
+---
+
+## 🤖 Use of AI
+
+**Wayfinder** is an agent built on the **OpenAI Responses API** ([`Backend/src/wayfinder.ts`](Backend/src/wayfinder.ts)); its behavior rules are in [`CLAUDE.md`](CLAUDE.md) (Wayfinder rules) and its system prompt in `wayfinder.ts`.
+
+| Model | Role |
+|---|---|
+| `gpt-5.5` (reasoning effort medium) | Wayfinder chat turns and tool calls |
+| `gpt-5-mini` | "Should Wayfinder reply?" classifier, so it doesn't answer every chat message (an `@wayfinder` mention always gets a reply) |
+
+- **Hand-written tool loop** (up to 20 steps per turn). Every tool argument is validated with **Zod** before it runs; invalid arguments go back to the model as an error instead of being coerced.
+- **Phase-gated tools.** The model only sees the tools allowed in the current phase:
+  - Any phase: `get_trip_state`, `search_products` (Channel3)
+  - Before Pricing: `update_trip`, `set_stops`, `set_nights` (plan edits that keep the trip length)
+  - Planning: `propose_destinations`, `draft_timeline`, `validate_timeline`, `create_poll`, `enrich_option`, `build_price_preview`
+  - Later: `get_schedule`, `query_transactions`, `get_balances`, `suggest_settlement`
+  - Destinations and Places: OpenAI's built-in **`web_search`** for real stays and restaurants with real prices
+- **Automatic pricing.** Entering Pricing prices every stop's winning stay and opens split bills.
+- **Runs on Render Workflows** when configured: Wayfinder turns, the reply check and product search run as workflow tasks ([`Backend/src/tasks.ts`](Backend/src/tasks.ts)) and call back to the API over Render's private network.
+
+### What the AI can't do
+
+- **Wayfinder can't move money.** It has no tool that creates, captures, refunds or transfers a payment, and none that edits a member's split. It only proposes; members confirm and pay in PayPal.
+- `suggest_settlement` only suggests who-pays-whom; members pay each other themselves.
+- Search results and product data go to the model as **untrusted tool data**, never into the system prompt.
+- After Places is confirmed, app events (splits, payments) no longer trigger Wayfinder turns; it still answers members who write in the chat.
+
+### Claude is for coding, not in the product
+
+The app's AI is **OpenAI only**. We used **Claude Code** as our coding assistant while building PayTogether; [`CLAUDE.md`](CLAUDE.md) and `.claude/skills/` are its project guide and skills. No Claude model runs in the app, and there is no Anthropic SDK in the code.
 
 ---
 
@@ -214,38 +258,6 @@ Open **http://localhost:5173** and click **Log in with PayPal**.
 #### Deploy to Render
 
 [`render.yaml`](render.yaml) is a Render Blueprint: **New → Blueprint** on this repo creates `paytogether-api`, `paytogether-web` and `paytogether-workflows`. Set `VITE_API_URL` on the web service to the API's URL, `WEB_ORIGIN` on the API to the web service's URL, add the API keys, and add the web URL as a Return URL in the PayPal app.
-
----
-
-## 🤖 Use of AI
-
-**Wayfinder** is an agent built on the **OpenAI Responses API** ([`Backend/src/wayfinder.ts`](Backend/src/wayfinder.ts)); its behavior rules are in [`CLAUDE.md`](CLAUDE.md) (Wayfinder rules) and its system prompt in `wayfinder.ts`.
-
-| Model | Role |
-|---|---|
-| `gpt-5.5` (reasoning effort medium) | Wayfinder chat turns and tool calls |
-| `gpt-5-mini` | "Should Wayfinder reply?" classifier, so it doesn't answer every chat message (an `@wayfinder` mention always gets a reply) |
-
-- **Hand-written tool loop** (up to 20 steps per turn). Every tool argument is validated with **Zod** before it runs; invalid arguments go back to the model as an error instead of being coerced.
-- **Phase-gated tools.** The model only sees the tools allowed in the current phase:
-  - Any phase: `get_trip_state`, `search_products` (Channel3)
-  - Before Pricing: `update_trip`, `set_stops`, `set_nights` (plan edits that keep the trip length)
-  - Planning: `propose_destinations`, `draft_timeline`, `validate_timeline`, `create_poll`, `enrich_option`, `build_price_preview`
-  - Later: `get_schedule`, `query_transactions`, `get_balances`, `suggest_settlement`
-  - Destinations and Places: OpenAI's built-in **`web_search`** for real stays and restaurants with real prices
-- **Automatic pricing.** Entering Pricing prices every stop's winning stay and opens split bills.
-- **Runs on Render Workflows** when configured: Wayfinder turns, the reply check and product search run as workflow tasks ([`Backend/src/tasks.ts`](Backend/src/tasks.ts)) and call back to the API over Render's private network.
-
-### What the AI can't do
-
-- **Wayfinder can't move money.** It has no tool that creates, captures, refunds or transfers a payment, and none that edits a member's split. It only proposes; members confirm and pay in PayPal.
-- `suggest_settlement` only suggests who-pays-whom; members pay each other themselves.
-- Search results and product data go to the model as **untrusted tool data**, never into the system prompt.
-- After Places is confirmed, app events (splits, payments) no longer trigger Wayfinder turns; it still answers members who write in the chat.
-
-### Claude is for coding, not in the product
-
-The app's AI is **OpenAI only**. We used **Claude Code** as our coding assistant while building PayTogether; [`CLAUDE.md`](CLAUDE.md) and `.claude/skills/` are its project guide and skills. No Claude model runs in the app, and there is no Anthropic SDK in the code.
 
 ---
 
